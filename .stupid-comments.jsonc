@@ -1,0 +1,6 @@
+{
+  // Mechanical calibration only. The policy itself lives in CLAUDE.md.
+  "mode": "block",
+  "bannedPatterns": ["\\bPRDs?[- ]?\\d*\\b"],
+  "exclude": ["**/target/**"]
+}

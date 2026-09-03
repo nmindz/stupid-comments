@@ -1,0 +1,22 @@
+{
+  "name": "stupid-comments",
+  "description": "Runtime enforcement for your code comment policy.",
+  "owner": {
+    "name": "nmindz",
+    "url": "https://github.com/nmindz/stupid-comments"
+  },
+  "plugins": [
+    {
+      "name": "stupid-comments",
+      "source": "./plugins/stupid-comments",
+      "description": "Enforces whatever comment policy you have written, at the point where the model writes code — not in a prompt it will forget.",
+      "version": "0.1.0",
+      "author": { "name": "nmindz", "url": "https://github.com/nmindz" },
+      "license": "GPL-3.0-or-later",
+      "repository": "https://github.com/nmindz/stupid-comments"
+    }
+  ],
+  "categories": [
+    { "name": "Code Quality", "description": "Linting and policy enforcement", "plugins": ["stupid-comments"] }
+  ]
+}

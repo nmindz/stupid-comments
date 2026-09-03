@@ -1,0 +1,49 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'command -v stupid-comments >/dev/null 2>&1 && exit 0; grep -qiE \"^#{1,6}[[:space:]]*comments?[[:space:]]+polic(y|ies)[[:space:]]*$\" \"$HOME/.claude/CLAUDE.md\" 2>/dev/null || exit 0; echo \"stupid-comments: a comment policy was found but the binary is not installed, so nothing is being enforced.\"; echo \"  install: cargo install --git https://github.com/nmindz/stupid-comments stupid-comments\"; echo \"  disable: /plugin uninstall stupid-comments@stupid-comments\"'",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'command -v stupid-comments >/dev/null 2>&1 && exec stupid-comments hook claude || exit 0'",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'command -v stupid-comments >/dev/null 2>&1 && exec stupid-comments hook claude || exit 0'",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'command -v stupid-comments >/dev/null 2>&1 && exec stupid-comments hook claude || exit 0'",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

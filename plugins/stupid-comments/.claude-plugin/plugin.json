@@ -1,0 +1,9 @@
+{
+  "name": "stupid-comments",
+  "description": "Enforces your comment policy at write time. Reads the policy from your CLAUDE.md, blocks violating writes, and re-injects the policy verbatim so the model stops drifting from it.",
+  "version": "0.1.0",
+  "author": { "name": "nmindz", "url": "https://github.com/nmindz" },
+  "license": "GPL-3.0-or-later",
+  "repository": "https://github.com/nmindz/stupid-comments",
+  "keywords": ["comments", "policy", "linting", "code-quality", "hooks"]
+}
