@@ -26,7 +26,7 @@ Two pieces, installed separately and on purpose. The plugin never downloads or e
 cargo install --root ~/.local --git https://github.com/nmindz/stupid-comments stupid-comments
 ```
 
-That lands the binary at `~/.local/bin/stupid-comments`. Drop `--root ~/.local` to use cargo's own default of `~/.cargo/bin` instead — either works, as long as the directory is on your `PATH`.
+That lands the binary at `~/.local/bin/stupid-comments`. Drop `--root ~/.local` to use cargo's own default of `~/.cargo/bin` instead. Pick whichever of the two is already on your `PATH` — installing into a directory the shell cannot resolve leaves the plugin permanently inert, since it decides whether to enforce by looking the binary up on `PATH`. Confirm with `command -v stupid-comments` rather than by checking the file exists.
 
 Needs a Rust toolchain; get one from <https://rustup.rs> if you have none. Verify with `stupid-comments --version`.
 
@@ -62,29 +62,40 @@ Paste this into a Claude Code session and it will do the setup for you:
 ```text
 Set up the stupid-comments comment policy enforcer on this machine.
 
-1. Check whether `stupid-comments` is already on PATH. If not, install it with
-   `cargo install --root ~/.local --git https://github.com/nmindz/stupid-comments stupid-comments`
-   which puts it in ~/.local/bin. If ~/.local/bin is not on my PATH, use
-   cargo's default instead by dropping the --root flag. If cargo is missing,
-   point me at https://rustup.rs and stop there. Confirm with
-   `stupid-comments --version`.
+1. If `command -v stupid-comments` already resolves, it is installed and
+   reachable — skip straight to step 4.
 
-2. Tell me to run these two myself, since you cannot run slash commands:
+2. Pick the install root by checking my PATH FIRST. Never install into a
+   directory PATH cannot resolve:
+     - if ~/.local/bin is in $PATH  -> cargo install --root ~/.local --git \
+         https://github.com/nmindz/stupid-comments stupid-comments
+     - else if ~/.cargo/bin is in $PATH -> same command without --root
+     - else STOP. Do not install. Tell me which directories cargo can target
+       and ask which one I want, or give me the export line to add to my
+       shell profile first.
+   Check with: case ":$PATH:" in *":$HOME/.local/bin:"*) ...
+   If cargo itself is missing, point me at https://rustup.rs and stop there.
+
+3. Verify by running `command -v stupid-comments` and `stupid-comments
+   --version`. If `command -v` does not resolve, the binary went somewhere
+   PATH cannot see it — say so plainly instead of reporting success.
+
+4. Tell me to run these two myself, since you cannot run slash commands:
    /plugin marketplace add nmindz/stupid-comments
    /plugin install stupid-comments@stupid-comments
 
-3. Read ~/.claude/CLAUDE.md and look for a heading matching "Comments Policy"
+5. Read ~/.claude/CLAUDE.md and look for a heading matching "Comments Policy"
    at any level, case-insensitive. If it is missing, DO NOT invent a policy.
    Show me where the section goes, ask what my rules are, and write exactly
    what I tell you.
 
-4. Run `stupid-comments policy` and show me the resolved source, mode and rules.
+6. Run `stupid-comments policy` and show me the resolved source, mode and rules.
 
-5. Explain that mode defaults to `shadow` — findings reported, nothing blocked —
+7. Explain that mode defaults to `shadow` — findings reported, nothing blocked —
    and that I should stay there until the reports look right before adding a
    .stupid-comments.jsonc with "mode": "block".
 
-6. Do not enable the `semantic` option. Tell me it exists, that it spends a
+8. Do not enable the `semantic` option. Tell me it exists, that it spends a
    `claude -p` call per checked file, and that turning it on is my call.
 ```
 
