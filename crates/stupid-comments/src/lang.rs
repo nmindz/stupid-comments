@@ -11,6 +11,8 @@ pub enum Lang {
     Kotlin,
     Json,
     Toml,
+    Yaml,
+    Hcl,
 }
 
 impl Lang {
@@ -25,6 +27,8 @@ impl Lang {
             "kt" | "kts" => Self::Kotlin,
             "json" | "jsonc" | "json5" => Self::Json,
             "toml" => Self::Toml,
+            "yaml" | "yml" => Self::Yaml,
+            "tf" | "tfvars" | "hcl" => Self::Hcl,
             _ => return None,
         })
     }
@@ -39,6 +43,8 @@ impl Lang {
             Self::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
             Self::Json => tree_sitter_json::LANGUAGE.into(),
             Self::Toml => tree_sitter_toml_ng::LANGUAGE.into(),
+            Self::Yaml => tree_sitter_yaml::LANGUAGE.into(),
+            Self::Hcl => tree_sitter_hcl::LANGUAGE.into(),
         }
     }
 
@@ -52,12 +58,21 @@ impl Lang {
             Self::Kotlin => "kotlin",
             Self::Json => "json",
             Self::Toml => "toml",
+            Self::Yaml => "yaml",
+            Self::Hcl => "hcl",
         }
     }
 
-    /// Ratio and redundancy rules are meaningless in config files.
+    /// Config files carry more explanation per line than code, so the ratio
+    /// rule measures them against a looser threshold of their own.
     pub fn is_data_format(self) -> bool {
-        matches!(self, Self::Json | Self::Toml)
+        matches!(self, Self::Json | Self::Toml | Self::Yaml | Self::Hcl)
+    }
+
+    /// Config formats whose comments are whole `#` lines, which a line scan
+    /// recovers when templating (Helm, and friends) defeats the grammar.
+    pub fn hash_line_comments(self) -> bool {
+        matches!(self, Self::Yaml | Self::Toml | Self::Hcl)
     }
 
     /// Grammar maturity is uneven here; findings stay non-blocking.

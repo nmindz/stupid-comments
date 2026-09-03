@@ -9,6 +9,6 @@ Procedure, in order:
 
 1. Refuse to continue if the working tree is dirty. Tell the user to commit or stash first — this rewrites files in bulk and git is the only escape hatch.
 2. Run `stupid-comments check ${1:-.} --adjudicate --json` and group the findings by file.
-3. Present a summary and stop. This is a dry run; do not edit yet.
+3. Present a summary and stop. This is a dry run; do not edit yet. State the coverage line as part of that summary: name the extensions the tool could not parse and say those files are unexamined. Do not describe the sweep as covering the repository when it covered the parseable part of it.
 4. Only after the user approves, rewrite the offending comments. Condense what carries meaning, delete what is pure noise, and never touch anything classified as `directive` or `license-header`.
 5. Commit the result as a single revision so the user can revert it wholesale.

@@ -1,0 +1,18 @@
+{{- if .Values.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "chart.fullname" . }}
+data:
+  entrypoint.sh: |
+    #!/bin/sh
+    # A shell script inside a block scalar. These lines are data, not YAML
+    # comments, and reading them as comments would trip the length rule and
+    # the ratio rule on a file that carries no YAML commentary at all.
+    # A fourth line, so the length rule would fire if this were misread.
+    # A fifth, and a sixth follows.
+    # A sixth.
+    exec /usr/bin/app --config /etc/app.toml
+  motd: >-
+    # not a comment either
+{{- end }}

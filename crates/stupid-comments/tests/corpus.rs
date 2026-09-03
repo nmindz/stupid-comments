@@ -23,7 +23,13 @@ fn fixture(name: &str) -> String {
 #[test]
 fn traps_produce_no_findings() {
     let p = policy(&[r"\bPRDs?[- ]?\d*\b"]);
-    for (name, lang) in [("traps.ts", Lang::TypeScript), ("traps.go", Lang::Go)] {
+    for (name, lang) in [
+        ("traps.ts", Lang::TypeScript),
+        ("traps.go", Lang::Go),
+        ("traps.yaml", Lang::Yaml),
+        ("traps-templated.yaml", Lang::Yaml),
+        ("traps.tf", Lang::Hcl),
+    ] {
         let findings = analyze_source(name, &fixture(name), lang, &p, false);
         assert!(
             findings.is_empty(),
@@ -165,4 +171,88 @@ fn stripping_a_file_bare_raises_the_gaming_signal() {
     assert!(signal.message.contains("Stripping comments"));
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn config_formats_resolve_from_their_extensions() {
+    for (path, lang) in [
+        ("deploy/stg/app.yaml", Lang::Yaml),
+        ("ci/pipeline.yml", Lang::Yaml),
+        ("infra/main.tf", Lang::Hcl),
+        ("infra/stg.tfvars", Lang::Hcl),
+        ("packer/build.hcl", Lang::Hcl),
+        ("tsconfig.json", Lang::Json),
+        ("Cargo.toml", Lang::Toml),
+    ] {
+        assert_eq!(
+            Lang::from_path(std::path::Path::new(path)),
+            Some(lang),
+            "{path} must resolve to {lang:?}"
+        );
+    }
+}
+
+#[test]
+fn a_comment_smothered_manifest_is_caught() {
+    let p = policy(&[r"\bPRDs?[- ]?\d*\b"]);
+    let findings = analyze_source("violations.yaml", &fixture("violations.yaml"), Lang::Yaml, &p, false);
+    let rules: Vec<&str> = findings.iter().map(|f| f.rule).collect();
+
+    assert!(rules.contains(&"comment-ratio"), "got {rules:?}");
+    assert!(rules.contains(&"prose-comment-too-long"), "got {rules:?}");
+    assert!(rules.contains(&"banned-pattern"), "got {rules:?}");
+}
+
+/// The ratio rule once skipped config files outright, so a manifest that was
+/// three-quarters commentary reported clean.
+#[test]
+fn config_files_are_measured_against_their_own_ratio() {
+    let mut p = policy(&[]);
+    p.rules.max_config_comment_ratio = 0.5;
+    let findings = analyze_source("violations.yaml", &fixture("violations.yaml"), Lang::Yaml, &p, false);
+    assert!(findings.iter().any(|f| f.rule == "comment-ratio"), "{findings:#?}");
+
+    p.rules.max_config_comment_ratio = 0.95;
+    let findings = analyze_source("violations.yaml", &fixture("violations.yaml"), Lang::Yaml, &p, false);
+    assert!(
+        findings.iter().all(|f| f.rule != "comment-ratio"),
+        "the config threshold must be what config files answer to: {findings:#?}"
+    );
+}
+
+/// A file with no grammar must never be indistinguishable from a clean one.
+#[test]
+fn unparseable_files_are_reported_as_skipped_not_clean() {
+    let dir = std::env::temp_dir().join(format!("sc-scan-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("app.yaml"), "key: value\n").unwrap();
+    std::fs::write(dir.join("notes.md"), "# heading\n").unwrap();
+
+    let scan = stupid_comments::scan(&dir);
+    assert!(scan.files.iter().any(|p| p.ends_with("app.yaml")), "{scan_files:?}", scan_files = scan.files);
+    assert!(scan.skipped.iter().any(|p| p.ends_with("notes.md")), "{:?}", scan.skipped);
+
+    let scan = stupid_comments::scan(&dir.join("notes.md"));
+    assert!(scan.files.is_empty());
+    assert_eq!(scan.skipped.len(), 1, "a named file with no grammar is skipped, not checked");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Helm templating collapses the YAML grammar to a single ERROR node, which
+/// once made every templated manifest report clean.
+#[test]
+fn templated_config_is_recovered_by_line_scan() {
+    let p = policy(&[]);
+    let name = "violations-templated.yaml";
+    let findings = analyze_source(name, &fixture(name), Lang::Yaml, &p, false);
+
+    assert!(
+        findings.iter().any(|f| f.rule == "prose-comment-too-long"),
+        "a templated manifest must still be checked: {findings:#?}"
+    );
+    assert!(
+        findings.iter().all(|f| f.severity == Severity::Warn),
+        "line-scan recovery is less certain, so it must not block: {findings:#?}"
+    );
 }

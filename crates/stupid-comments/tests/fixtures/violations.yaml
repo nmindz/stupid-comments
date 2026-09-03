@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# Deployment manifest for the analytics service, staging environment.
+# Every value below was tuned against the load test results from the last
+# capacity planning cycle, so do not change them without re-running that
+# exercise first and getting sign-off from the platform team (see PRD-4471).
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # The name of the deployment as it appears in the cluster.
+  name: analytics
+spec:
+  # The number of replicas we want running at any given time. Three is the
+  # minimum for a quorum across our three availability zones, and going below
+  # that has caused availability incidents in the past.
+  replicas: 3
+  template:
+    spec:
+      containers:
+        # The main application container.
+        - name: app
+          # The image tag, which is replaced by CI at deploy time.
+          image: analytics:latest

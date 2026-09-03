@@ -26,6 +26,7 @@ pub struct Config {
     pub prose: Option<String>,
     pub max_prose_comment_lines: Option<usize>,
     pub max_comment_ratio: Option<f64>,
+    pub max_config_comment_ratio: Option<f64>,
     pub min_prose_comments_for_ratio: Option<usize>,
     pub max_doc_comment_lines: Option<usize>,
     pub banned_patterns: Option<Vec<String>>,
@@ -40,6 +41,7 @@ pub struct Rules {
     pub mode: Mode,
     pub max_prose_comment_lines: usize,
     pub max_comment_ratio: f64,
+    pub max_config_comment_ratio: f64,
     pub min_prose_comments_for_ratio: usize,
     pub max_doc_comment_lines: usize,
     pub banned_patterns: Vec<String>,
@@ -55,6 +57,7 @@ impl Default for Rules {
             mode: Mode::Shadow,
             max_prose_comment_lines: 5,
             max_comment_ratio: 0.35,
+            max_config_comment_ratio: 0.5,
             min_prose_comments_for_ratio: 4,
             max_doc_comment_lines: 40,
             banned_patterns: Vec::new(),
@@ -108,6 +111,9 @@ fn merge(config: Option<Config>) -> Rules {
     }
     if let Some(v) = c.max_comment_ratio {
         rules.max_comment_ratio = v;
+    }
+    if let Some(v) = c.max_config_comment_ratio {
+        rules.max_config_comment_ratio = v;
     }
     if let Some(v) = c.min_prose_comments_for_ratio {
         rules.min_prose_comments_for_ratio = v;

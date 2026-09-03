@@ -1,0 +1,16 @@
+{{- if .Values.enabled }}
+# ---------------------------------------------------------------------------
+# Helm-templated deployment for the analytics service.
+# The values file drives replica count and image tag, so anything hard-coded
+# here is a bug. See the chart README for the full list of knobs and their
+# defaults before you touch this file, and check PRD-4471 for the rationale
+# behind the resource requests, which were sized during capacity planning.
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "chart.fullname" . }}
+spec:
+  # The replica count comes straight from the values file.
+  replicas: {{ .Values.replicaCount }}
+{{- end }}

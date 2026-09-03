@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use stupid_comments::{analyze_file, collect_files, hook, policy, rules::Severity};
+use stupid_comments::{analyze_file, hook, lang::Lang, policy, rules::Severity, scan};
 
 #[derive(Parser)]
 #[command(name = "stupid-comments", version, about = "Enforces your comment policy against LLM-generated code.")]
@@ -60,14 +60,30 @@ fn check(paths: Vec<PathBuf>, json: bool, adjudicate: bool) -> Result<ExitCode> 
     };
 
     let mut findings = Vec::new();
+    let mut checked: Vec<PathBuf> = Vec::new();
+    let mut skipped: Vec<PathBuf> = Vec::new();
+    let mut missing: Vec<PathBuf> = Vec::new();
+
     for path in &paths {
-        for file in collect_files(path) {
-            findings.extend(analyze_file(&file, &policy, adjudicate));
+        if !path.exists() {
+            missing.push(path.clone());
+            continue;
         }
+        let scan = scan(path);
+        for file in &scan.files {
+            findings.extend(analyze_file(file, &policy, adjudicate));
+        }
+        checked.extend(scan.files);
+        skipped.extend(scan.skipped);
     }
+
+    // Coverage goes to stderr so --json consumers keep a clean stdout.
+    eprintln!("{}", coverage(&checked, &skipped, &missing));
 
     if json {
         println!("{}", serde_json::to_string_pretty(&findings)?);
+    } else if checked.is_empty() {
+        println!("Nothing checked. Policy source: {}", policy.source);
     } else if findings.is_empty() {
         println!("No violations. Policy source: {}", policy.source);
     } else {
@@ -87,10 +103,79 @@ fn check(paths: Vec<PathBuf>, json: bool, adjudicate: bool) -> Result<ExitCode> 
         }
     }
 
-    Ok(match findings.iter().any(|f| f.severity == Severity::Block) {
+    let blocked = findings.iter().any(|f| f.severity == Severity::Block);
+    Ok(match blocked || !missing.is_empty() {
         true => ExitCode::FAILURE,
         false => ExitCode::SUCCESS,
     })
+}
+
+/// Names what was and was not parsed. A file with no grammar is not a passing
+/// file, and reporting it as one is how whole directories go unchecked.
+fn coverage(checked: &[PathBuf], skipped: &[PathBuf], missing: &[PathBuf]) -> String {
+    let mut s = format!(
+        "Checked {} file{} ({}).",
+        checked.len(),
+        plural(checked.len()),
+        tally(checked, |p| Lang::from_path(p).map(|l| l.name().to_string()))
+    );
+    if !skipped.is_empty() {
+        s.push_str(&format!(
+            "\nNot checked — no grammar for {} file{}: {}",
+            skipped.len(),
+            plural(skipped.len()),
+            tally(&skipped_of_interest(skipped), |p| Some(format!(
+                ".{}",
+                p.extension()?.to_str()?
+            )))
+        ));
+    }
+    for path in missing {
+        s.push_str(&format!("\nNo such path: {}", path.display()));
+    }
+    s
+}
+
+/// Extensionless files are noise; a bare extension is a lead worth chasing.
+fn skipped_of_interest(skipped: &[PathBuf]) -> Vec<PathBuf> {
+    skipped
+        .iter()
+        .filter(|p| p.extension().is_some())
+        .cloned()
+        .collect()
+}
+
+fn tally(paths: &[PathBuf], key: impl Fn(&PathBuf) -> Option<String>) -> String {
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for path in paths {
+        let Some(k) = key(path) else { continue };
+        match counts.iter_mut().find(|(name, _)| *name == k) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((k, 1)),
+        }
+    }
+    if counts.is_empty() {
+        return "none".into();
+    }
+    counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let shown = counts.len().min(6);
+    let mut out = counts[..shown]
+        .iter()
+        .map(|(name, n)| format!("{name} {n}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if counts.len() > shown {
+        out.push_str(&format!(", +{} more", counts.len() - shown));
+    }
+    out
+}
+
+fn plural(n: usize) -> &'static str {
+    if n == 1 {
+        ""
+    } else {
+        "s"
+    }
 }
 
 fn run_hook() -> Result<ExitCode> {

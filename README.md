@@ -109,6 +109,7 @@ Everything below is optional. Drop a `.stupid-comments.jsonc` anywhere at or abo
   "bannedPatterns": ["\\bPRDs?[- ]?\\d*\\b"],
   "maxProseCommentLines": 5,
   "maxCommentRatio": 0.35,
+  "maxConfigCommentRatio": 0.5,  // YAML/TOML/HCL/JSON answer to this one
   "minProseCommentsForRatio": 4,
   "maxDocCommentLines": 40,
   "redundancy": "warn",
@@ -155,14 +156,21 @@ A gate that counts only violations cannot tell "learned taste" from "stopped wri
 
 ## Languages
 
-JavaScript, TypeScript, TSX/JSX, Rust, Go, Kotlin, JSON/JSONC, and TOML, via native tree-sitter grammars. Anything else is ignored silently. JSON and TOML get banned-pattern and length checks only — ratio and redundancy are meaningless in a config file. Kotlin findings are warn-only for now while its grammar earns trust.
+JavaScript, TypeScript, TSX/JSX, Rust, Go, Kotlin, JSON/JSONC/JSON5, TOML, YAML, and HCL/Terraform, via native tree-sitter grammars. Kotlin findings are warn-only for now while its grammar earns trust.
 
-Failure is always open. Unknown language, parse error, missing binary, unreadable config — all of them mean *no findings*, never a blocked write.
+Config formats get every rule, but the ratio rule measures them against `maxConfigCommentRatio` rather than `maxCommentRatio` — a manifest carries more explanation per line than code does, and holding it to the code threshold would flag files that are fine. Holding it to *nothing*, which is what an exemption amounts to, is how a manifest that is three-quarters commentary reports clean.
+
+Templating defeats the YAML grammar: a Helm chart parses to a single error node with no comments in it, which would make every templated manifest in a repository look clean. When the grammar fails on a `#`-comment format, comments are recovered by a line scan instead — whole-line comments only, block scalars left alone, so the failure direction is a missed comment rather than an invented one. Findings from a recovered parse are warn-only.
+
+`check` reports what it parsed and what it could not, because a file with no grammar is not a passing file: `Checked 14 files (yaml 6, rust 8)` followed by `Not checked — no grammar for 31 files: .md 28, .png 3`. A path that does not exist is an error, not a pass.
+
+Failure is otherwise open. Parse error, missing binary, unreadable config — all of them mean *no findings*, never a blocked write.
 
 ## Known limits
 
 - Redundancy detection is warn-only. It is the most false-positive-prone rule here and has not earned blocking authority.
-- Kotlin findings are warn-only while its grammar earns trust.
+- Kotlin findings are warn-only while its grammar earns trust, as are findings recovered by line scan from a templated config file.
+- The line-scan fallback reads whole-line comments only, so a trailing `# comment` on a value line goes unchecked in a templated file.
 - Semantic judging costs a model call per checked file, so it is off by default.
 - The `Stop` gate diffs against `HEAD`, so a tree that was already dirty before the session has those earlier changes considered too.
 

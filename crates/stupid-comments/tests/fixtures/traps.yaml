@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization.json
+# yamllint disable rule:line-length
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics
+spec:
+  replicas: 3
+  strategy:
+    # Surge above the quorum so a rollout never drops below three healthy pods.
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    spec:
+      containers:
+        - name: app
+          image: analytics:latest
+          env:
+            # Pinned: the driver leaks connections when the pool is unbounded.
+            - name: DB_POOL_MAX
+              value: "20"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

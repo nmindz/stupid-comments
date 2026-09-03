@@ -100,15 +100,26 @@ fn excluded(path: &Path, policy: &Policy) -> bool {
         .unwrap_or(false)
 }
 
-pub fn collect_files(root: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
+/// Files the tool can parse, and the ones it cannot. Silence about the second
+/// list is how an unparsed file passes for a clean one.
+#[derive(Default)]
+pub struct Scan {
+    pub files: Vec<PathBuf>,
+    pub skipped: Vec<PathBuf>,
+}
+
+pub fn scan(root: &Path) -> Scan {
+    let mut out = Scan::default();
     walk(root, &mut out);
     out
 }
 
-fn walk(path: &Path, out: &mut Vec<PathBuf>) {
+fn walk(path: &Path, out: &mut Scan) {
     if path.is_file() {
-        out.push(path.to_path_buf());
+        match Lang::from_path(path) {
+            Some(_) => out.files.push(path.to_path_buf()),
+            None => out.skipped.push(path.to_path_buf()),
+        }
         return;
     }
     let Ok(entries) = std::fs::read_dir(path) else {
@@ -123,7 +134,9 @@ fn walk(path: &Path, out: &mut Vec<PathBuf>) {
                 walk(&p, out);
             }
         } else if Lang::from_path(&p).is_some() {
-            out.push(p);
+            out.files.push(p);
+        } else {
+            out.skipped.push(p);
         }
     }
 }

@@ -48,7 +48,7 @@ pub fn evaluate(ctx: &Context, extraction: &Extraction) -> Vec<Finding> {
 
     check_ratio(ctx, extraction, &mut findings);
 
-    if ctx.lang.is_provisional() {
+    if ctx.lang.is_provisional() || extraction.recovered {
         for f in &mut findings {
             f.severity = Severity::Warn;
         }
@@ -117,9 +117,11 @@ fn check_length(ctx: &Context, c: &Comment, out: &mut Vec<Finding>) {
 }
 
 fn check_ratio(ctx: &Context, extraction: &Extraction, out: &mut Vec<Finding>) {
-    if ctx.lang.is_data_format() {
-        return;
-    }
+    let limit = if ctx.lang.is_data_format() {
+        ctx.rules.max_config_comment_ratio
+    } else {
+        ctx.rules.max_comment_ratio
+    };
     let prose: Vec<&Comment> = extraction
         .comments
         .iter()
@@ -131,7 +133,7 @@ fn check_ratio(ctx: &Context, extraction: &Extraction, out: &mut Vec<Finding>) {
     }
     let commented: usize = prose.iter().map(|c| c.line_count()).sum();
     let ratio = commented as f64 / extraction.total_lines as f64;
-    if ratio <= ctx.rules.max_comment_ratio {
+    if ratio <= limit {
         return;
     }
 
