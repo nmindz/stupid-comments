@@ -169,7 +169,7 @@ Templating defeats the YAML grammar: a Helm chart parses to a single error node 
 
 A config file that cannot be parsed is now an error rather than silence. `check` and `policy` print the reason and exit non-zero; only the hook still fails open, since an unreadable config must never block a write.
 
-`check` reports what it parsed and what it could not, because a file with no grammar is not a passing file: `Checked 14 files (yaml 6, rust 8)` followed by `Not checked — no grammar for 31 files: .md 28, .png 3`. A path that does not exist is an error, not a pass.
+`check` reports what it parsed and what it could not, because a file with no grammar is not a passing file: `Checked 14 files (yaml 6, rust 8)` followed by `Not checked — no grammar for 31 files: .md 28, .png 3`. Anything your `exclude` globs drop is reported on its own line rather than folded into the checked count, so the numbers add up and a file the tool deliberately never opened is never presented as one it cleared. A path that does not exist is an error, not a pass.
 
 Failure is otherwise open. Parse error, missing binary, unreadable config — all of them mean *no findings*, never a blocked write.
 

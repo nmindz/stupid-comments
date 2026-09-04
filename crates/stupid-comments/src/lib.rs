@@ -84,7 +84,7 @@ pub fn prose_comment_count(source: &str, lang: Lang) -> usize {
         .unwrap_or(0)
 }
 
-fn excluded(path: &Path, policy: &Policy) -> bool {
+pub fn excluded(path: &Path, policy: &Policy) -> bool {
     if policy.rules.exclude.is_empty() {
         return false;
     }

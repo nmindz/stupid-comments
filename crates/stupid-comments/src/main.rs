@@ -71,6 +71,7 @@ fn check(paths: Vec<PathBuf>, json: bool, adjudicate: bool) -> Result<ExitCode> 
     let mut findings = Vec::new();
     let mut checked: Vec<PathBuf> = Vec::new();
     let mut skipped: Vec<PathBuf> = Vec::new();
+    let mut excluded: Vec<PathBuf> = Vec::new();
     let mut missing: Vec<PathBuf> = Vec::new();
 
     for path in &paths {
@@ -82,12 +83,19 @@ fn check(paths: Vec<PathBuf>, json: bool, adjudicate: bool) -> Result<ExitCode> 
         for file in &scan.files {
             findings.extend(analyze_file(file, &policy, adjudicate));
         }
-        checked.extend(scan.files);
+        // A file the config excludes was not checked either; folding it into
+        // the checked count is the same lie in a friendlier costume.
+        let (dropped, seen): (Vec<PathBuf>, Vec<PathBuf>) = scan
+            .files
+            .into_iter()
+            .partition(|f| stupid_comments::excluded(f, &policy));
+        checked.extend(seen);
+        excluded.extend(dropped);
         skipped.extend(scan.skipped);
     }
 
     // Coverage goes to stderr so --json consumers keep a clean stdout.
-    eprintln!("{}", coverage(&checked, &skipped, &missing));
+    eprintln!("{}", coverage(&checked, &skipped, &excluded, &missing));
 
     if json {
         println!("{}", serde_json::to_string_pretty(&findings)?);
@@ -121,7 +129,12 @@ fn check(paths: Vec<PathBuf>, json: bool, adjudicate: bool) -> Result<ExitCode> 
 
 /// Names what was and was not parsed. A file with no grammar is not a passing
 /// file, and reporting it as one is how whole directories go unchecked.
-fn coverage(checked: &[PathBuf], skipped: &[PathBuf], missing: &[PathBuf]) -> String {
+fn coverage(
+    checked: &[PathBuf],
+    skipped: &[PathBuf],
+    excluded: &[PathBuf],
+    missing: &[PathBuf],
+) -> String {
     let mut s = format!(
         "Checked {} file{} ({}).",
         checked.len(),
@@ -137,6 +150,13 @@ fn coverage(checked: &[PathBuf], skipped: &[PathBuf], missing: &[PathBuf]) -> St
                 Some(ext) => Some(format!(".{ext}")),
                 None => p.file_name()?.to_str().map(str::to_string),
             })
+        ));
+    }
+    if !excluded.is_empty() {
+        s.push_str(&format!(
+            "\nNot checked — excluded by config: {} file{}",
+            excluded.len(),
+            plural(excluded.len())
         ));
     }
     for path in missing {

@@ -341,3 +341,21 @@ fn shell_strings_and_heredocs_are_not_comments() {
         );
     }
 }
+
+/// An excluded file was folded into the "checked" count, which reports a file
+/// the tool deliberately never opened as one it cleared.
+#[test]
+fn excluded_files_are_not_counted_as_checked() {
+    use stupid_comments::excluded;
+    let mut p = policy(&[]);
+    p.rules.exclude = vec!["**/fixtures/**".into()];
+
+    let inside = std::path::Path::new("crates/x/tests/fixtures/traps.yaml");
+    let outside = std::path::Path::new("crates/x/src/lang.rs");
+
+    assert!(excluded(inside, &p), "the glob must match the fixture");
+    assert!(!excluded(outside, &p), "source must survive the glob");
+
+    p.rules.exclude.clear();
+    assert!(!excluded(inside, &p), "an empty exclude list matches nothing");
+}
