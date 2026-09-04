@@ -1,36 +1,104 @@
 # stupid-comments
 
+**Runtime enforcement for your code comment policy.** A Rust CLI that parses what an LLM is about to write, checks it against *your* policy, and refuses the write when it violates.
+
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.4-green.svg)](https://github.com/nmindz/stupid-comments/releases)
+[![Rust](https://img.shields.io/badge/rust-2021%20edition-orange.svg)](https://www.rust-lang.org)
+
+---
+
+## The problem
+
 Every model tier, at every reasoning level, eventually forgets your comment policy and starts writing `// Increment the counter` above `counter++`. That is an attention problem, and no amount of restating the rule in `CLAUDE.md` fixes it — the instruction is simply too far back in the context by the time the code gets written.
 
-So this moves enforcement out of the prompt and into the runtime. A Rust CLI parses what the model is about to write, checks it against **your** policy, and refuses the write when it violates — re-injecting your policy text verbatim at the exact moment it matters.
+So this moves enforcement out of the prompt and into the runtime, re-injecting your policy text verbatim at the exact moment it matters.
 
 The policy is never baked in. It is yours, it is prose, and it lives where you already keep it.
+
+## Quick start
+
+```sh
+git clone https://github.com/nmindz/stupid-comments && cd stupid-comments
+make install
+```
+
+Then, inside Claude Code:
+
+```
+/plugin marketplace add nmindz/stupid-comments
+/plugin install stupid-comments@stupid-comments
+```
+
+Finally, add a `# Comments Policy` section to `~/.claude/CLAUDE.md` in your own words, and confirm it was picked up:
+
+```sh
+stupid-comments policy
+```
+
+Without that section and without a config file, the plugin stays completely silent. There is no default policy, because a default policy would be someone else's taste.
+
+## Table of contents
+
+- [How it works](#how-it-works)
+- [Installation](#installation)
+- [AI agent instructions](#ai-agent-instructions)
+- [Configuration](#configuration)
+- [Rules](#rules)
+- [CLI usage](#cli-usage)
+- [Slash commands](#slash-commands)
+- [Semantic judging](#semantic-judging)
+- [Escaping it](#escaping-it)
+- [Detecting evasion](#detecting-evasion)
+- [Languages](#languages)
+- [Development](#development)
+- [Known limits](#known-limits)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## How it works
 
 Your policy is read from the `# Comments Policy` section of `~/.claude/CLAUDE.md` (any heading level, case-insensitive). That text is quoted verbatim in every rejection, never paraphrased. If no such section and no config file exist, the plugin does nothing at all and says nothing at all.
 
-Enforcement is layered. `PreToolUse` catches Write/Edit/MultiEdit early, reconstructing the post-edit file in memory so rules see whole-file context while reporting only the lines the edit introduced. `Stop` and `SubagentStop` are the real guarantee: they diff the working tree and analyze added lines only, which makes them indifferent to *how* the file was written — heredoc, `sed`, or a subagent all land in the same net.
+**Enforcement is layered.** `PreToolUse` catches Write/Edit/MultiEdit early, reconstructing the post-edit file in memory so rules see whole-file context while reporting only the lines the edit introduced. `Stop` and `SubagentStop` are the real guarantee: they diff the working tree and analyze added lines only, which makes them indifferent to *how* the file was written — heredoc, `sed`, or a subagent all land in the same net.
 
-Nothing is judged until it is classified. Every comment is sorted into `directive`, `license-header`, `doc-comment`, or `prose`, and only `prose` faces the length, ratio, and redundancy rules. Lint pragmas, `go:build` lines, shebangs, SPDX headers, and JSDoc are structurally exempt rather than merely tolerated — and a pragma placed above a comment block never launders the block beneath it.
+**Nothing is judged until it is classified.** Every comment is sorted into `directive`, `license-header`, `doc-comment`, or `prose`, and only `prose` faces the ratio and redundancy rules. Lint pragmas, `go:build` lines, shebangs, SPDX headers, and JSDoc are structurally exempt rather than merely tolerated — and a pragma placed above a comment block never launders the block beneath it.
 
-Deletion is not compliance. A gate you can satisfy by removing the comment trains the model to write none at all, which inverts a policy that asks for *just enough* commenting. So findings name the offending span, demand a rewrite, and say outright that removing it does not count. Bulk deletion is legitimate on a legacy codebase, but only under `/stupid-comments:fix`, where a human is present and there is nothing to game.
+**Deletion is not compliance.** A gate you can satisfy by removing the comment trains the model to write none at all, which inverts a policy that asks for *just enough* commenting. So findings name the offending span, demand a rewrite, and say outright that removing it does not count. Bulk deletion is legitimate on a legacy codebase, but only under `/stupid-comments:fix`, where a human is present and there is nothing to game.
 
-## Install
+## Installation
 
 Two pieces, installed separately and on purpose. The plugin never downloads or executes anything on your behalf — a marketplace plugin that silently fetches a remote binary is exactly the supply-chain pattern worth distrusting.
 
+Requires a Rust toolchain. Get one from <https://rustup.rs> if you have none.
+
 ### 1. The CLI
 
+**From a clone (recommended):**
+
 ```sh
+make install                        # installs to ~/.local/bin
+make install ROOT=$HOME/.cargo      # or wherever your PATH points
+```
+
+`make install` runs the cargo command below, then reports what `command -v` actually resolves to and its version.
+
+**With cargo directly:**
+
+```sh
+# from a clone
+cargo install --path crates/stupid-comments --root ~/.local --force
+
+# or straight from git, without cloning
 cargo install --root ~/.local --git https://github.com/nmindz/stupid-comments stupid-comments
 ```
 
-That lands the binary at `~/.local/bin/stupid-comments`. Drop `--root ~/.local` to use cargo's own default of `~/.cargo/bin` instead. Pick whichever of the two is already on your `PATH` — installing into a directory the shell cannot resolve leaves the plugin permanently inert, since it decides whether to enforce by looking the binary up on `PATH`. Confirm with `command -v stupid-comments` rather than by checking the file exists.
+Drop `--root ~/.local` to use cargo's own default of `~/.cargo/bin`.
 
-From a clone, `make install` runs exactly that, then tells you whether `command -v` can actually reach the result. `make help` lists the rest — `build`, `test`, `lint`, `validate`, `selfcheck`, and `check` for all of them at once. Override the destination with `make install ROOT=$HOME/.cargo`.
+> [!IMPORTANT]
+> Pick whichever directory is already on your `PATH`. The plugin decides whether to enforce by looking the binary up on `PATH`, so installing somewhere the shell cannot resolve leaves enforcement **permanently inert**. Confirm with `command -v stupid-comments`, not by checking that the file exists.
 
-Needs a Rust toolchain; get one from <https://rustup.rs> if you have none. Verify with `stupid-comments --version`.
+Verify with `stupid-comments --version`.
 
 ### 2. The plugin
 
@@ -41,13 +109,21 @@ Inside Claude Code:
 /plugin install stupid-comments@stupid-comments
 ```
 
-Then restart the session so the hooks register. If a policy exists but the CLI is missing, the plugin says so once at session start and enforces nothing.
+Restart the session so the hooks register. If a policy exists but the CLI is missing, the plugin says so once at session start and enforces nothing.
+
+To upgrade later, both pieces move independently:
+
+```sh
+make install
+claude plugin marketplace update stupid-comments
+claude plugin update stupid-comments@stupid-comments
+```
 
 ### 3. A policy
 
 Add a `# Comments Policy` section to `~/.claude/CLAUDE.md` describing, in your own words, how you want comments written. Confirm it was picked up with `stupid-comments policy`.
 
-Without that section and without a config file the plugin stays completely silent. There is no default policy, because a default policy would be someone else's taste.
+To keep the policy somewhere else, point at it with the `prose` config key.
 
 ### Verify
 
@@ -57,7 +133,7 @@ stupid-comments check path/to/your/code
 
 The CLI stands alone, so the same command works as a pre-commit hook or a CI step with `--json`.
 
-## AI Agent Instructions
+## AI agent instructions
 
 Paste this into a Claude Code session and it will do the setup for you:
 
@@ -101,29 +177,86 @@ Set up the stupid-comments comment policy enforcer on this machine.
    `claude -p` call per checked file, and that turning it on is my call.
 ```
 
-## Configure
+## Configuration
 
-Everything below is optional. Drop a `.stupid-comments.jsonc` anywhere at or above the file being checked:
+Everything here is optional. Drop a `.stupid-comments.jsonc` anywhere at or above the file being checked; the nearest one upward wins.
 
 ```jsonc
 {
-  "mode": "block",              // shadow (default) | warn | block
+  "mode": "block",                    // shadow (default) | warn | block
   "bannedPatterns": ["\\bPRDs?[- ]?\\d*\\b"],
   "maxProseCommentLines": 5,
+  "maxDocCommentLines": 40,
   "maxCommentRatio": 0.35,
   "minProseCommentsForRatio": 4,
-  "maxDocCommentLines": 40,
   "redundancy": "warn",
-  "semantic": "off",           // off (default) | warn | block
+  "semantic": "shadow",               // shadow (default) | warn | block
   "exclude": ["**/generated/**"]
 }
 ```
 
+| Key | Type | Default | Purpose |
+| --- | --- | --- | --- |
+| `mode` | `shadow` \| `warn` \| `block` | `shadow` | Global severity ceiling. `shadow` reports without blocking |
+| `prose` | path | — | Read the policy from this file instead of `CLAUDE.md`. `~` expands |
+| `maxProseCommentLines` | integer | `5` | Longest permitted prose comment block |
+| `maxDocCommentLines` | integer | `40` | Longest permitted doc comment |
+| `maxCommentRatio` | float | `0.35` | Share of a file that may be prose comments |
+| `minProseCommentsForRatio` | integer | `4` | Comment *blocks* required before the ratio rule applies |
+| `bannedPatterns` | regex list | empty | Text that may never appear in a comment |
+| `redundancy` | `shadow` \| `warn` \| `block` | `warn` | Comments that restate the line below them |
+| `semantic` | `shadow` \| `warn` \| `block` | `shadow` | LLM taste judgement. See [Semantic judging](#semantic-judging) |
+| `semanticCommand` | string list | `["claude", "-p"]` | Command the semantic judge shells out to |
+| `exclude` | glob list | empty | Paths to skip entirely |
+
 These are *calibration*, not policy. The defaults are deliberately loose, because a threshold tight enough to be opinionated would be smuggling in someone else's taste.
 
-**`mode` defaults to `shadow`**: findings are reported, nothing is blocked. Run that way until the log convinces you the blocks would have been right, then switch to `block`.
+> [!TIP]
+> `mode` defaults to `shadow`: findings are reported, nothing is blocked. Stay there until the log convinces you the blocks would have been right, then switch to `block`.
 
-## Commands
+An unparseable config is an error, not silence — `check` and `policy` print the reason and exit non-zero. Only the hook still fails open, since an unreadable config must never block a write.
+
+## Rules
+
+| Rule | Default severity | Fires when |
+| --- | --- | --- |
+| `banned-pattern` | block | A comment matches one of your `bannedPatterns` |
+| `prose-comment-too-long` | block | A prose block exceeds `maxProseCommentLines` |
+| `doc-comment-too-long` | warn | A doc comment exceeds `maxDocCommentLines` |
+| `comment-ratio` | block | Prose comments cover more than `maxCommentRatio` of the file |
+| `redundant-comment` | warn | A comment restates the code directly below it |
+| `semantic` | warn | The judge decides a comment has not earned its place |
+| `comments-removed` | warn | A file that had prose comments now has none |
+
+Severities are ceilings, not floors: under `"mode": "shadow"` or `"warn"` every finding is downgraded, and findings recovered from a file whose grammar failed are always warn-only.
+
+## CLI usage
+
+```sh
+stupid-comments check [PATH]...     # report findings, change nothing
+stupid-comments check --json        # machine-readable, for CI
+stupid-comments check --adjudicate  # permit deletion as a remedy
+stupid-comments policy              # show the resolved policy and its source
+stupid-comments hook claude         # consume a hook payload on stdin
+```
+
+Every run prints a coverage summary to **stderr**, leaving stdout clean for `--json`:
+
+```
+Checked 17 files (rust 12, json 2, toml 2, make 1).
+Not checked — no grammar for 8 files: .md 5, .gitignore 1, .lock 1, LICENSE 1
+Not checked — excluded by config: 10 files
+```
+
+A file with no grammar is not a passing file, so it is never folded into the checked count. The numbers add up on purpose.
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | No blocking findings |
+| `1` | A blocking finding, an unreadable config, or a path that does not exist |
+| `2` | Hook only: block the pending write |
+
+## Slash commands
 
 | Command | Purpose |
 | --- | --- |
@@ -149,7 +282,8 @@ Suppression pragmas exist, but they are anchored to git:
 // stupid-comments: ignore-file   -> suppresses the whole file
 ```
 
-A pragma is honored **only if the identical line already exists in `HEAD`**. One introduced in the same change as the violation it silences is ignored entirely, so the model cannot write its own exemption. Outside a git repository no pragma is honored.
+> [!NOTE]
+> A pragma is honored **only if the identical line already exists in `HEAD`**. One introduced in the same change as the violation it silences is ignored entirely, so the model cannot write its own exemption. Outside a git repository no pragma is honored.
 
 ## Detecting evasion
 
@@ -157,21 +291,50 @@ A gate that counts only violations cannot tell "learned taste" from "stopped wri
 
 ## Languages
 
-JavaScript, TypeScript, TSX/JSX, Rust, Go, Kotlin, JSON/JSONC/JSON5, TOML, YAML, HCL/Terraform, shell (sh/bash/zsh/ksh), and Make, via native tree-sitter grammars. Kotlin findings are warn-only for now while its grammar earns trust.
+JavaScript, TypeScript, TSX/JSX, Rust, Go, Kotlin, JSON/JSONC/JSON5, TOML, YAML, HCL/Terraform, shell (sh/bash/zsh/ksh), and Make, via native tree-sitter grammars.
 
-Not every file carries its language in its extension. `Makefile`, `GNUmakefile`, `Makefile.*` and `*.mk` are matched by name, as are the usual shell rc files, and an extensionless file is checked for a shell shebang — a `scripts/` directory is mostly extensionless, and skipping one silently is indistinguishable from checking it and finding nothing. `#!/usr/bin/env bash` counts; `#!/usr/bin/env python3` does not, and neither does `fish`.
+**Not every file carries its language in its extension.** `Makefile`, `GNUmakefile`, `Makefile.*` and `*.mk` are matched by name, as are the usual shell rc files, and an extensionless file is checked for a shell shebang — a `scripts/` directory is mostly extensionless, and skipping one silently is indistinguishable from checking it and finding nothing. `#!/usr/bin/env bash` counts; `#!/usr/bin/env python3` does not, and neither does `fish`.
 
-A `#` inside a shell string, a heredoc body, or a Make recipe is data, not commentary. Telling those apart is the whole reason this uses grammars rather than a regex over lines starting with `#`.
+**A `#` inside a shell string, a heredoc body, or a Make recipe is data, not commentary.** Telling those apart is the whole reason this uses grammars rather than a regex over lines starting with `#`.
 
-Config formats answer to exactly the same rules as code, `maxCommentRatio` included. They have twice been given something gentler — first an outright exemption from the ratio rule, then a looser threshold of their own — and both times the result was a manifest sitting at a comment load that would be flagged on sight in a `.go` file. A YAML at 43% comments is a YAML at 43% comments; there is no version of "just enough" that reads differently because the file ends in `.yaml`.
+**Config formats answer to exactly the same rules as code**, `maxCommentRatio` included. They have twice been given something gentler — first an outright exemption from the ratio rule, then a looser threshold of their own — and both times the result was a manifest sitting at a comment load that would be flagged on sight in a `.go` file. A YAML at 43% comments is a YAML at 43% comments; there is no version of "just enough" that reads differently because the file ends in `.yaml`.
 
-Templating defeats the YAML grammar: a Helm chart parses to a single error node with no comments in it, which would make every templated manifest in a repository look clean. When the grammar fails on a `#`-comment format, comments are recovered by a line scan instead — whole-line comments only, block scalars left alone, so the failure direction is a missed comment rather than an invented one. Findings from a recovered parse are warn-only.
+**Templating defeats the YAML grammar.** A Helm chart parses to a single error node with no comments in it, which would make every templated manifest in a repository look clean. When the grammar fails on a `#`-comment format, comments are recovered by a line scan instead — whole-line comments only, block scalars left alone, so the failure direction is a missed comment rather than an invented one.
 
-A config file that cannot be parsed is now an error rather than silence. `check` and `policy` print the reason and exit non-zero; only the hook still fails open, since an unreadable config must never block a write.
+Failure is otherwise open. Parse error, missing binary, unreadable config — inside the hook all of them mean *no findings*, never a blocked write.
 
-`check` reports what it parsed and what it could not, because a file with no grammar is not a passing file: `Checked 14 files (yaml 6, rust 8)` followed by `Not checked — no grammar for 31 files: .md 28, .png 3`. Anything your `exclude` globs drop is reported on its own line rather than folded into the checked count, so the numbers add up and a file the tool deliberately never opened is never presented as one it cleared. A path that does not exist is an error, not a pass.
+## Development
 
-Failure is otherwise open. Parse error, missing binary, unreadable config — all of them mean *no findings*, never a blocked write.
+Requires a Rust toolchain. `make help` lists every target.
+
+| Make | Cargo equivalent | Purpose |
+| --- | --- | --- |
+| `make build` | `cargo build --release` | Compile the release binary |
+| `make test` | `cargo test` | Run the test suite |
+| `make lint` | `cargo clippy --all-targets` | Lint every target |
+| `make validate` | `claude plugin validate plugins/stupid-comments` | Check the plugin manifests |
+| `make check` | all three of the above | Everything CI would run |
+| `make install` | `cargo install --path crates/stupid-comments --root ~/.local --force` | Install the binary |
+| `make uninstall` | `cargo uninstall --root ~/.local stupid-comments` | Remove it |
+| `make selfcheck` | `./target/release/stupid-comments check .` | Enforce this repo's policy on itself |
+| `make clean` | `cargo clean` | Remove build artifacts |
+
+`make selfcheck` is the one that matters: the enforcer answers to its own policy, and a change that makes this repo fail its own gate is not ready.
+
+```
+crates/stupid-comments/src/
+├── lang.rs        # language detection and grammar bindings
+├── comments.rs    # extraction and classification
+├── rules.rs       # the deterministic rules
+├── semantic.rs    # the opt-in LLM judge
+├── policy.rs      # config and policy resolution
+├── hook.rs        # Claude Code hook payloads
+├── suppress.rs    # git-anchored pragmas
+├── session.rs     # cross-turn evasion tracking
+└── main.rs        # CLI
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the commit convention and a walkthrough of adding a language.
 
 ## Known limits
 
@@ -182,6 +345,10 @@ Failure is otherwise open. Parse error, missing binary, unreadable config — al
 - `minProseCommentsForRatio` counts comment *blocks*, not lines, so a file carrying fewer than four separate blocks never trips the ratio rule however much of the file they cover. Long blocks are caught by the length rule instead.
 - Semantic judging costs a model call per checked file, so it is off by default.
 - The `Stop` gate diffs against `HEAD`, so a tree that was already dirty before the session has those earlier changes considered too.
+
+## Contributing
+
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
