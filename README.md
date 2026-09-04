@@ -3,7 +3,7 @@
 **Runtime enforcement for your code comment policy.** A Rust CLI that parses what an LLM is about to write, checks it against *your* policy, and refuses the write when it violates.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.4-green.svg)](https://github.com/nmindz/stupid-comments/releases)
+[![Version](https://img.shields.io/badge/version-0.1.5-green.svg)](https://github.com/nmindz/stupid-comments/releases)
 [![Rust](https://img.shields.io/badge/rust-2021%20edition-orange.svg)](https://www.rust-lang.org)
 
 ---

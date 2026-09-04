@@ -359,3 +359,68 @@ fn excluded_files_are_not_counted_as_checked() {
     p.rules.exclude.clear();
     assert!(!excluded(inside, &p), "an empty exclude list matches nothing");
 }
+
+/// show_head stripped an absolute repo root off whatever path it was handed.
+/// A relative path, a bare filename, or a path through a symlinked directory
+/// never matched, so HEAD came back None and every pragma in the file was
+/// silently dropped — including under `check .`, which is what the :fix
+/// command runs.
+#[test]
+fn a_committed_pragma_survives_every_path_form() {
+    let dir = std::env::temp_dir().join(format!("sc-vcs-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(dir.join("internal/deep")).unwrap();
+
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .current_dir(&dir)
+            .args(args)
+            .output()
+            .expect("git runs")
+    };
+    git(&["init", "-q", "."]);
+    git(&["config", "user.email", "t@t.t"]);
+    git(&["config", "user.name", "t"]);
+
+    std::fs::write(dir.join(".stupid-comments.jsonc"), "{ \"mode\": \"block\" }\n").unwrap();
+    let long = "// one\n// two\n// three\n// four\n// five\n// six\nexport const x = 1;\n";
+    std::fs::write(
+        dir.join("internal/deep/pragma.ts"),
+        format!("// stupid-comments: ignore\n{long}"),
+    )
+    .unwrap();
+    std::fs::write(dir.join("internal/deep/plain.ts"), long).unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "init"]);
+
+    let check = |arg: &str| -> String {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_stupid-comments"))
+            .current_dir(&dir)
+            .args(["check", arg])
+            .output()
+            .expect("binary runs");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+
+    // Without this the test would pass on a run that checked nothing at all.
+    assert!(
+        check("internal/deep/plain.ts").contains("prose-comment-too-long"),
+        "the control file must still be flagged"
+    );
+
+    let canonical = dir.canonicalize().unwrap();
+    for arg in [
+        "internal/deep/pragma.ts",
+        "./internal/deep/pragma.ts",
+        ".",
+        canonical.join("internal/deep/pragma.ts").to_str().unwrap(),
+    ] {
+        let out = check(arg);
+        assert!(
+            !out.contains("pragma.ts"),
+            "pragma dropped for {arg:?}: {out}"
+        );
+    }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
