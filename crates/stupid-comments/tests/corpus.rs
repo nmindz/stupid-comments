@@ -29,6 +29,8 @@ fn traps_produce_no_findings() {
         ("traps.yaml", Lang::Yaml),
         ("traps-templated.yaml", Lang::Yaml),
         ("traps.tf", Lang::Hcl),
+        ("traps.sh", Lang::Shell),
+        ("traps.mk", Lang::Make),
     ] {
         let findings = analyze_source(name, &fixture(name), lang, &p, false);
         assert!(
@@ -181,6 +183,12 @@ fn config_formats_resolve_from_their_extensions() {
         ("infra/main.tf", Lang::Hcl),
         ("infra/stg.tfvars", Lang::Hcl),
         ("packer/build.hcl", Lang::Hcl),
+        ("scripts/deploy.sh", Lang::Shell),
+        ("scripts/lib.bash", Lang::Shell),
+        ("Makefile", Lang::Make),
+        ("GNUmakefile", Lang::Make),
+        ("Makefile.local", Lang::Make),
+        ("build/rules.mk", Lang::Make),
         ("tsconfig.json", Lang::Json),
         ("Cargo.toml", Lang::Toml),
     ] {
@@ -274,4 +282,62 @@ fn templated_config_is_recovered_by_line_scan() {
         findings.iter().all(|f| f.severity == Severity::Warn),
         "line-scan recovery is less certain, so it must not block: {findings:#?}"
     );
+}
+
+/// A scripts/ directory is mostly extensionless, and skipping one silently is
+/// indistinguishable from checking it and finding nothing.
+#[test]
+fn a_shebang_identifies_an_extensionless_script() {
+    let dir = std::env::temp_dir().join(format!("sc-shebang-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let cases = [
+        ("deploy", "#!/usr/bin/env bash\nset -e\n", Some(Lang::Shell)),
+        ("posix", "#!/bin/sh\necho hi\n", Some(Lang::Shell)),
+        ("flagged", "#!/bin/bash -e\necho hi\n", Some(Lang::Shell)),
+        ("pyscript", "#!/usr/bin/env python3\nprint(1)\n", None),
+        ("fishy", "#!/usr/bin/fish\necho hi\n", None),
+        ("plain", "just text, no shebang\n", None),
+    ];
+    for (name, body, want) in cases {
+        let path = dir.join(name);
+        std::fs::write(&path, body).unwrap();
+        assert_eq!(Lang::from_file(&path), want, "{name}");
+    }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Shell strings and heredoc bodies are data. Counting a `#` there would
+/// invent violations in scripts that carry almost no commentary.
+#[test]
+fn shell_strings_and_heredocs_are_not_comments() {
+    let mut p = policy(&[]);
+    // Zero threshold: the rule fires on any prose at all, so the reported
+    // count is what the test is actually reading.
+    p.rules.max_comment_ratio = 0.0;
+    p.rules.min_prose_comments_for_ratio = 1;
+
+    // Each fixture carries exactly one real comment; every other `#` sits in a
+    // string, a heredoc body, or a recipe, and must not be counted.
+    for (name, lang) in [("traps.sh", Lang::Shell), ("traps.mk", Lang::Make)] {
+        let findings = analyze_source(name, &fixture(name), lang, &p, false);
+        let ratio = findings
+            .iter()
+            .find(|f| f.rule == "comment-ratio")
+            .unwrap_or_else(|| panic!("{name}: expected a ratio finding: {findings:#?}"));
+
+        let counted: usize = ratio
+            .message
+            .split_whitespace()
+            .nth(3)
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("{name}: unparseable message {:?}", ratio.message));
+
+        assert_eq!(
+            counted, 1,
+            "{name}: a `#` in a string, heredoc or recipe was counted as a comment: {:?}",
+            ratio.message
+        );
+    }
 }

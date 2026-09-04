@@ -21,7 +21,7 @@ pub fn analyze_file(path: &Path, policy: &Policy, adjudicate: bool) -> Vec<Findi
     if excluded(path, policy) {
         return Vec::new();
     }
-    let Some(lang) = Lang::from_path(path) else {
+    let Some(lang) = Lang::from_file(path) else {
         return Vec::new();
     };
     let Ok(source) = std::fs::read_to_string(path) else {
@@ -116,7 +116,7 @@ pub fn scan(root: &Path) -> Scan {
 
 fn walk(path: &Path, out: &mut Scan) {
     if path.is_file() {
-        match Lang::from_path(path) {
+        match Lang::from_file(path) {
             Some(_) => out.files.push(path.to_path_buf()),
             None => out.skipped.push(path.to_path_buf()),
         }
@@ -133,7 +133,7 @@ fn walk(path: &Path, out: &mut Scan) {
             if !SKIP_DIRS.contains(&name.as_ref()) && !name.starts_with('.') {
                 walk(&p, out);
             }
-        } else if Lang::from_path(&p).is_some() {
+        } else if Lang::from_file(&p).is_some() {
             out.files.push(p);
         } else {
             out.skipped.push(p);

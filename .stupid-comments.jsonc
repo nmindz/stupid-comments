@@ -2,5 +2,6 @@
   // Mechanical calibration only. The policy itself lives in CLAUDE.md.
   "mode": "block",
   "bannedPatterns": ["\\bPRDs?[- ]?\\d*\\b"],
-  "exclude": ["**/target/**"]
+  // Fixtures exist to violate; policing them would be policing the test data.
+  "exclude": ["**/target/**", "**/tests/fixtures/**"]
 }

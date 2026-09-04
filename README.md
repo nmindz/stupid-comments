@@ -155,7 +155,11 @@ A gate that counts only violations cannot tell "learned taste" from "stopped wri
 
 ## Languages
 
-JavaScript, TypeScript, TSX/JSX, Rust, Go, Kotlin, JSON/JSONC/JSON5, TOML, YAML, and HCL/Terraform, via native tree-sitter grammars. Kotlin findings are warn-only for now while its grammar earns trust.
+JavaScript, TypeScript, TSX/JSX, Rust, Go, Kotlin, JSON/JSONC/JSON5, TOML, YAML, HCL/Terraform, shell (sh/bash/zsh/ksh), and Make, via native tree-sitter grammars. Kotlin findings are warn-only for now while its grammar earns trust.
+
+Not every file carries its language in its extension. `Makefile`, `GNUmakefile`, `Makefile.*` and `*.mk` are matched by name, as are the usual shell rc files, and an extensionless file is checked for a shell shebang — a `scripts/` directory is mostly extensionless, and skipping one silently is indistinguishable from checking it and finding nothing. `#!/usr/bin/env bash` counts; `#!/usr/bin/env python3` does not, and neither does `fish`.
+
+A `#` inside a shell string, a heredoc body, or a Make recipe is data, not commentary. Telling those apart is the whole reason this uses grammars rather than a regex over lines starting with `#`.
 
 Config formats answer to exactly the same rules as code, `maxCommentRatio` included. They have twice been given something gentler — first an outright exemption from the ratio rule, then a looser threshold of their own — and both times the result was a manifest sitting at a comment load that would be flagged on sight in a `.go` file. A YAML at 43% comments is a YAML at 43% comments; there is no version of "just enough" that reads differently because the file ends in `.yaml`.
 
@@ -172,6 +176,7 @@ Failure is otherwise open. Parse error, missing binary, unreadable config — al
 - Redundancy detection is warn-only. It is the most false-positive-prone rule here and has not earned blocking authority.
 - Kotlin findings are warn-only while its grammar earns trust, as are findings recovered by line scan from a templated config file.
 - The line-scan fallback reads whole-line comments only, so a trailing `# comment` on a value line goes unchecked in a templated file.
+- Python has no grammar yet, so `.py` files are named as unchecked rather than checked.
 - `minProseCommentsForRatio` counts comment *blocks*, not lines, so a file carrying fewer than four separate blocks never trips the ratio rule however much of the file they cover. Long blocks are caught by the length rule instead.
 - Semantic judging costs a model call per checked file, so it is off by default.
 - The `Stop` gate diffs against `HEAD`, so a tree that was already dirty before the session has those earlier changes considered too.

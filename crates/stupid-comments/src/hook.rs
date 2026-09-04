@@ -70,7 +70,7 @@ fn pre_tool_use(payload: &Value, policy: &Policy) -> Analysis {
         return (Vec::new(), Vec::new());
     };
     let path = Path::new(path);
-    let Some(lang) = crate::lang::Lang::from_path(path) else {
+    let Some(lang) = crate::lang::Lang::from_file(path) else {
         return (Vec::new(), Vec::new());
     };
 
@@ -142,7 +142,7 @@ fn stop(cwd: &Path, policy: &Policy) -> Analysis {
         }));
 
         if let (Some(lang), Ok(source)) = (
-            crate::lang::Lang::from_path(&file),
+            crate::lang::Lang::from_file(&file),
             std::fs::read_to_string(&file),
         ) {
             counts.push((

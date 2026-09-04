@@ -126,32 +126,23 @@ fn coverage(checked: &[PathBuf], skipped: &[PathBuf], missing: &[PathBuf]) -> St
         "Checked {} file{} ({}).",
         checked.len(),
         plural(checked.len()),
-        tally(checked, |p| Lang::from_path(p).map(|l| l.name().to_string()))
+        tally(checked, |p| Lang::from_file(p).map(|l| l.name().to_string()))
     );
     if !skipped.is_empty() {
         s.push_str(&format!(
             "\nNot checked — no grammar for {} file{}: {}",
             skipped.len(),
             plural(skipped.len()),
-            tally(&skipped_of_interest(skipped), |p| Some(format!(
-                ".{}",
-                p.extension()?.to_str()?
-            )))
+            tally(skipped, |p| match p.extension().and_then(|e| e.to_str()) {
+                Some(ext) => Some(format!(".{ext}")),
+                None => p.file_name()?.to_str().map(str::to_string),
+            })
         ));
     }
     for path in missing {
         s.push_str(&format!("\nNo such path: {}", path.display()));
     }
     s
-}
-
-/// Extensionless files are noise; a bare extension is a lead worth chasing.
-fn skipped_of_interest(skipped: &[PathBuf]) -> Vec<PathBuf> {
-    skipped
-        .iter()
-        .filter(|p| p.extension().is_some())
-        .cloned()
-        .collect()
 }
 
 fn tally(paths: &[PathBuf], key: impl Fn(&PathBuf) -> Option<String>) -> String {

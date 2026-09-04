@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::Path;
 use tree_sitter::Language;
 
@@ -13,10 +14,15 @@ pub enum Lang {
     Toml,
     Yaml,
     Hcl,
+    Shell,
+    Make,
 }
 
 impl Lang {
     pub fn from_path(path: &Path) -> Option<Self> {
+        if let Some(lang) = path.file_name().and_then(|n| n.to_str()).and_then(Self::from_name) {
+            return Some(lang);
+        }
         let ext = path.extension()?.to_str()?.to_ascii_lowercase();
         Some(match ext.as_str() {
             "js" | "mjs" | "cjs" | "jsx" => Self::JavaScript,
@@ -29,8 +35,44 @@ impl Lang {
             "toml" => Self::Toml,
             "yaml" | "yml" => Self::Yaml,
             "tf" | "tfvars" | "hcl" => Self::Hcl,
+            "sh" | "bash" | "zsh" | "ksh" => Self::Shell,
+            "mk" | "make" => Self::Make,
             _ => return None,
         })
+    }
+
+    /// Build files and shell rc files carry their type in the name.
+    fn from_name(name: &str) -> Option<Self> {
+        if name.starts_with("Makefile.") || name.starts_with("makefile.") {
+            return Some(Self::Make);
+        }
+        match name {
+            "Makefile" | "makefile" | "GNUmakefile" => Some(Self::Make),
+            ".bashrc" | ".bash_profile" | ".bash_aliases" | ".zshrc" | ".zprofile"
+            | ".profile" => Some(Self::Shell),
+            _ => None,
+        }
+    }
+
+    /// Same as `from_path`, plus a shebang peek for extensionless files — a
+    /// `scripts/` directory is usually full of them, and skipping one silently
+    /// is indistinguishable from checking it and finding nothing.
+    pub fn from_file(path: &Path) -> Option<Self> {
+        if let Some(lang) = Self::from_path(path) {
+            return Some(lang);
+        }
+        if path.extension().is_some() {
+            return None;
+        }
+        let mut buf = [0u8; 128];
+        let n = std::fs::File::open(path).ok()?.read(&mut buf).ok()?;
+        let head = std::str::from_utf8(&buf[..n]).ok()?;
+        let shebang = head.lines().next()?.strip_prefix("#!")?;
+
+        shebang
+            .split_whitespace()
+            .any(|w| matches!(w.rsplit('/').next(), Some("sh" | "bash" | "zsh" | "ksh" | "dash")))
+            .then_some(Self::Shell)
     }
 
     pub fn language(self) -> Language {
@@ -45,6 +87,8 @@ impl Lang {
             Self::Toml => tree_sitter_toml_ng::LANGUAGE.into(),
             Self::Yaml => tree_sitter_yaml::LANGUAGE.into(),
             Self::Hcl => tree_sitter_hcl::LANGUAGE.into(),
+            Self::Shell => tree_sitter_bash::LANGUAGE.into(),
+            Self::Make => tree_sitter_make::LANGUAGE.into(),
         }
     }
 
@@ -60,6 +104,8 @@ impl Lang {
             Self::Toml => "toml",
             Self::Yaml => "yaml",
             Self::Hcl => "hcl",
+            Self::Shell => "shell",
+            Self::Make => "make",
         }
     }
 
