@@ -28,6 +28,8 @@ cargo install --root ~/.local --git https://github.com/nmindz/stupid-comments st
 
 That lands the binary at `~/.local/bin/stupid-comments`. Drop `--root ~/.local` to use cargo's own default of `~/.cargo/bin` instead. Pick whichever of the two is already on your `PATH` — installing into a directory the shell cannot resolve leaves the plugin permanently inert, since it decides whether to enforce by looking the binary up on `PATH`. Confirm with `command -v stupid-comments` rather than by checking the file exists.
 
+From a clone, `make install` runs exactly that, then tells you whether `command -v` can actually reach the result. `make help` lists the rest — `build`, `test`, `lint`, `validate`, `selfcheck`, and `check` for all of them at once. Override the destination with `make install ROOT=$HOME/.cargo`.
+
 Needs a Rust toolchain; get one from <https://rustup.rs> if you have none. Verify with `stupid-comments --version`.
 
 ### 2. The plugin
