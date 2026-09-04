@@ -203,21 +203,40 @@ fn a_comment_smothered_manifest_is_caught() {
     assert!(rules.contains(&"banned-pattern"), "got {rules:?}");
 }
 
-/// The ratio rule once skipped config files outright, so a manifest that was
-/// three-quarters commentary reported clean.
+/// The ratio rule first skipped config files outright, then measured them
+/// against a looser threshold of their own. Both let a manifest carry a
+/// comment load that would be flagged instantly in a .go or .ts file.
 #[test]
-fn config_files_are_measured_against_their_own_ratio() {
-    let mut p = policy(&[]);
-    p.rules.max_config_comment_ratio = 0.5;
-    let findings = analyze_source("violations.yaml", &fixture("violations.yaml"), Lang::Yaml, &p, false);
-    assert!(findings.iter().any(|f| f.rule == "comment-ratio"), "{findings:#?}");
+fn config_files_answer_to_the_same_ratio_as_code() {
+    // Separate blocks: minProseCommentsForRatio counts blocks, not lines.
+    let yaml = "# alpha\na: 1\n# bravo\nb: 2\n# charlie\nc: 3\n# delta\nd: 4\n# echo\ne: 5\n";
+    let code = "// alpha\nconst a = 1;\n// bravo\nconst b = 2;\n// charlie\nconst c = 3;\n// delta\nconst d = 4;\n// echo\nconst e = 5;\n";
 
-    p.rules.max_config_comment_ratio = 0.95;
-    let findings = analyze_source("violations.yaml", &fixture("violations.yaml"), Lang::Yaml, &p, false);
-    assert!(
-        findings.iter().all(|f| f.rule != "comment-ratio"),
-        "the config threshold must be what config files answer to: {findings:#?}"
-    );
+    let mut p = policy(&[]);
+    p.rules.max_comment_ratio = 0.35;
+
+    for (name, src, lang) in [
+        ("x.yaml", yaml, Lang::Yaml),
+        ("x.ts", code, Lang::TypeScript),
+    ] {
+        let findings = analyze_source(name, src, lang, &p, false);
+        assert!(
+            findings.iter().any(|f| f.rule == "comment-ratio"),
+            "{name} is half comments and must trip the ratio rule: {findings:#?}"
+        );
+    }
+
+    p.rules.max_comment_ratio = 0.95;
+    for (name, src, lang) in [
+        ("x.yaml", yaml, Lang::Yaml),
+        ("x.ts", code, Lang::TypeScript),
+    ] {
+        let findings = analyze_source(name, src, lang, &p, false);
+        assert!(
+            findings.iter().all(|f| f.rule != "comment-ratio"),
+            "{name} must answer to maxCommentRatio, the single knob: {findings:#?}"
+        );
+    }
 }
 
 /// A file with no grammar must never be indistinguishable from a clean one.

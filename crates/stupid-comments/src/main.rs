@@ -34,14 +34,23 @@ enum Command {
 }
 
 fn main() -> ExitCode {
-    match dispatch() {
+    let command = Cli::parse().command;
+    // The hook fails open — an unreadable config must never block a write.
+    // Everything else says so, rather than passing for a clean run.
+    let fail_open = matches!(command, Command::Hook { .. });
+
+    match dispatch(command) {
         Ok(code) => code,
-        Err(_) => ExitCode::SUCCESS,
+        Err(_) if fail_open => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("stupid-comments: {e:#}");
+            ExitCode::FAILURE
+        }
     }
 }
 
-fn dispatch() -> Result<ExitCode> {
-    match Cli::parse().command {
+fn dispatch(command: Command) -> Result<ExitCode> {
+    match command {
         Command::Check { paths, json, adjudicate } => check(paths, json, adjudicate),
         Command::Hook { .. } => run_hook(),
         Command::Policy => show_policy(),

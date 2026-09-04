@@ -63,12 +63,6 @@ impl Lang {
         }
     }
 
-    /// Config files carry more explanation per line than code, so the ratio
-    /// rule measures them against a looser threshold of their own.
-    pub fn is_data_format(self) -> bool {
-        matches!(self, Self::Json | Self::Toml | Self::Yaml | Self::Hcl)
-    }
-
     /// Config formats whose comments are whole `#` lines, which a line scan
     /// recovers when templating (Helm, and friends) defeats the grammar.
     pub fn hash_line_comments(self) -> bool {

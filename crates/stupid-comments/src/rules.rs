@@ -117,11 +117,6 @@ fn check_length(ctx: &Context, c: &Comment, out: &mut Vec<Finding>) {
 }
 
 fn check_ratio(ctx: &Context, extraction: &Extraction, out: &mut Vec<Finding>) {
-    let limit = if ctx.lang.is_data_format() {
-        ctx.rules.max_config_comment_ratio
-    } else {
-        ctx.rules.max_comment_ratio
-    };
     let prose: Vec<&Comment> = extraction
         .comments
         .iter()
@@ -133,7 +128,7 @@ fn check_ratio(ctx: &Context, extraction: &Extraction, out: &mut Vec<Finding>) {
     }
     let commented: usize = prose.iter().map(|c| c.line_count()).sum();
     let ratio = commented as f64 / extraction.total_lines as f64;
-    if ratio <= limit {
+    if ratio <= ctx.rules.max_comment_ratio {
         return;
     }
 
