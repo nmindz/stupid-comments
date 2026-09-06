@@ -81,17 +81,25 @@ export function apply(ctx, config = {}) {
   })
 }
 
+const INSTALL_HINT = 'cargo install --root ~/.local --git https://github.com/nmindz/stupid-comments stupid-comments'
+
 /**
  * One spawn of `stupid-comments hook dsh` with the payload on stdin. The first
- * ENOENT disables the runner for the rest of the process: a user who installed
- * the plugin but not the binary gets one warning, not one per tool call.
+ * unusable binary disables the runner for the rest of the process: a user whose
+ * binary is missing or too old gets one warning, not one per tool call.
  */
 function createRunner(ctx, binary, timeoutMs) {
   const quiet = { block: false, message: '' }
-  let missing = false
+  let unusable = false
+  let handshake
 
   return async function run(agent, payload, signal) {
-    if (missing || process.env[DISARM_ENV] === '0') return quiet
+    if (unusable || process.env[DISARM_ENV] === '0') return quiet
+    handshake ??= probe(binary, timeoutMs)
+    if (!await handshake) {
+      unusable = true
+      return quiet
+    }
     const cwd = workspaceOf(agent)
 
     try {
@@ -99,16 +107,31 @@ function createRunner(ctx, binary, timeoutMs) {
       const message = result.stderr.trim()
       if (!message) return quiet
       return { block: result.code === BLOCK_EXIT_CODE, message }
-    } catch (error) {
-      if (error?.code === 'ENOENT') {
-        missing = true
-        ctx.logger?.warn(
-          `${name}: "${binary}" is not on PATH, so nothing is being enforced. `
-          + 'Install it with: cargo install --root ~/.local --git https://github.com/nmindz/stupid-comments stupid-comments',
-        )
-      }
+    } catch {
       return quiet
     }
+  }
+
+  /**
+   * Ask the binary to answer an empty payload before trusting its exit codes.
+   * A binary older than the DSH client rejects the argument through its
+   * argument parser, which exits 2 — the same code that means "block this
+   * write". Without this handshake a stale install denies every write with a
+   * usage error as the reason.
+   */
+  async function probe(binary, timeoutMs) {
+    try {
+      const result = await execute(binary, {}, { timeoutMs })
+      if (result.code === 0) return true
+      ctx.logger?.warn(
+        `${name}: "${binary}" does not understand this plugin (\`hook dsh\` exited ${result.code}), `
+        + `so nothing is being enforced. Update it with: ${INSTALL_HINT}`,
+      )
+    } catch (error) {
+      const reason = error?.code === 'ENOENT' ? 'is not on PATH' : `could not be run (${String(error)})`
+      ctx.logger?.warn(`${name}: "${binary}" ${reason}, so nothing is being enforced. Install it with: ${INSTALL_HINT}`)
+    }
+    return false
   }
 }
 

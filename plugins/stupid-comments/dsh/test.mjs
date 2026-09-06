@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -151,6 +151,24 @@ const CLEAN = 'export const x = 1\n'
   assert.equal(await listeners.get('tools/pre-execute')(writeCall(agent, VIOLATION), () => ALLOWED), ALLOWED)
   assert.equal(warnings.length, 1, 'the missing binary is reported once, not per call')
   assert.match(warnings[0], /cargo install/)
+}
+
+// --- A binary too old to know this client must not read as a block. ---
+{
+  // An argument parser rejects an unknown client with exit 2, which is also
+  // the code that means "block this write".
+  const stale = join(project, 'stale-binary')
+  writeFileSync(stale, '#!/bin/sh\necho "error: invalid value \'dsh\' for \'<CLIENT>\'" >&2\nexit 2\n')
+  chmodSync(stale, 0o755)
+
+  const { ctx, listeners, warnings } = createContext()
+  apply(ctx, { binary: stale })
+  const { agent } = createAgent()
+
+  assert.equal(await listeners.get('tools/pre-execute')(writeCall(agent, VIOLATION), () => ALLOWED), ALLOWED)
+  assert.equal(await listeners.get('tools/pre-execute')(writeCall(agent, VIOLATION), () => ALLOWED), ALLOWED)
+  assert.equal(warnings.length, 1, 'the stale binary is reported once, not per call')
+  assert.match(warnings[0], /does not understand this plugin/)
 }
 
 // --- A command steers the shared prompt with its arguments expanded. ---
