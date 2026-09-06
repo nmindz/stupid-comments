@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Superseded runs on the same ref are pointless once a newer commit exists.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Build, test and self-enforce
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo test --locked
+
+      - run: cargo clippy --all-targets --locked
+
+      - run: cargo build --release --locked
+
+      # The enforcer answers to its own policy. Without a home memory file CI
+      # resolves the repo's .stupid-comments.jsonc, so the mechanical rules
+      # still apply and a violation here fails the build.
+      - name: Enforce this repo's comment policy on itself
+        run: ./target/release/stupid-comments check .
+
+      # The DSH adapter tests drive this exact binary, and so does anyone
+      # reproducing a failure locally.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stupid-comments-linux-x64
+          path: target/release/stupid-comments
+          retention-days: 7
+          if-no-files-found: error
+
+  plugin:
+    name: DSH adapter on Node ${{ matrix.node }}
+    needs: rust
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.13', '24']
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # The adapter is only meaningful against the real engine, so the tests
+      # run the binary this commit produced rather than a stub.
+      - uses: actions/download-artifact@v4
+        with:
+          name: stupid-comments-linux-x64
+          path: target/release
+
+      - run: chmod +x target/release/stupid-comments
+
+      - run: pnpm run validate
+
+      - run: pnpm test
+
+  package:
+    name: Package
+    needs: rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - run: pnpm pack
+
+      # The DSH plugin reads its command prompts from disk at runtime, and they
+      # live outside the module. A bad `files` list would otherwise surface only
+      # once someone installed the package.
+      - name: Verify tarball contents
+        run: |
+          tar tzf stupid-comments-*.tgz | sort > /tmp/contents.txt
+          cat /tmp/contents.txt
+          for required in \
+            package/plugins/stupid-comments/dsh/index.js \
+            package/plugins/stupid-comments/dsh/cordis.patch.yml \
+            package/plugins/stupid-comments/commands/check.md \
+            package/plugins/stupid-comments/commands/fix.md \
+            package/plugins/stupid-comments/commands/off.md \
+            package/plugins/stupid-comments/commands/policy.md \
+            package/plugins/stupid-comments/hooks/hooks.json \
+            package/plugins/stupid-comments/.claude-plugin/plugin.json \
+            package/.claude-plugin/marketplace.json \
+            package/README.md \
+            package/LICENSE
+          do
+            grep -qx "$required" /tmp/contents.txt || { echo "missing from tarball: $required"; exit 1; }
+          done
+          ! grep -qx package/plugins/stupid-comments/dsh/test.mjs /tmp/contents.txt \
+            || { echo "the adapter test suite must not ship"; exit 1; }
+
+  commits:
+    name: Lint commit messages
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # semantic-release derives the next version from these messages, so a
+      # malformed one silently costs a release.
+      - run: pnpm exec commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose

@@ -1,0 +1,87 @@
+name: Release
+
+# Runs only after CI succeeded on master. semantic-release decides from the
+# Conventional Commits since the last tag whether there is anything to release
+# at all, so an ordinary chore/ci/docs push exits in seconds without staging
+# anything.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+# OIDC trusted publishing: npm mints a short-lived credential from this
+# workflow's identity, so no NPM_TOKEN secret exists to leak or rotate.
+# Configure it once at https://www.npmjs.com/package/stupid-comments/access
+# -> Trusted publisher -> GitHub Actions, repository nmindz/stupid-comments,
+# workflow .github/workflows/release.yml, environment production. The name must
+# match the `environment:` below exactly, or npm rejects the OIDC claim.
+#
+# Leave "publish directly" UNCHECKED under Allowed actions. This job stages the
+# release instead: the tarball and its provenance are uploaded, and the version
+# goes live only after a human runs `npm stage approve <stage-id>` with a 2FA
+# code. CI therefore never holds a credential that can publish on its own, and a
+# compromised workflow run cannot ship a version by itself.
+permissions:
+  contents: write # semantic-release pushes the changelog commit and the tag
+  issues: write # release comments on the issues a release closes
+  pull-requests: write
+  id-token: write # OIDC for npm trusted publishing
+
+jobs:
+  release:
+    name: Stage release
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Check out the exact commit CI validated, with full history so
+          # semantic-release can read every commit since the last tag.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      # Checking out a SHA leaves a detached HEAD, and semantic-release refuses
+      # to release from one ("triggered on the branch undefined"). Put a real
+      # master branch on the exact commit CI validated.
+      - name: Attach the validated commit to master
+        run: git checkout -B master ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          cache: pnpm
+
+      # Trusted publishing and `npm stage` both need a recent npm.
+      - name: Pin an OIDC-capable npm
+        run: npm install -g npm@latest
+
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # The published package is plain JavaScript and the manifests it ships
+      # alongside; nothing here is compiled, so there is no build to reuse.
+      - name: Verify the package wiring
+        run: pnpm run validate
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm exec semantic-release
+
+      - name: Report what is waiting for approval
+        if: success()
+        run: |
+          echo "If a version was staged, approve it to make it live:"
+          npm stage list stupid-comments || true
+          echo
+          echo "  npm stage view <stage-id>      # inspect first"
+          echo "  npm stage approve <stage-id>   # publishes, asks for 2FA"
+          echo "  npm stage reject <stage-id>    # discards it"
