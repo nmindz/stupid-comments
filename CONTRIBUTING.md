@@ -224,7 +224,8 @@ npm stage reject <stage-id>     # discards it
 
 ### One-time setup
 
-- On npm: package settings -> **Trusted publisher** -> GitHub Actions, repository `nmindz/stupid-comments`, workflow `.github/workflows/release.yml`, environment `production`. Leave "publish directly" **unchecked** so releases stage rather than publish. npm only offers this on a package that already exists, so version 0.1.5 has to be published manually once.
+- On npm: package settings -> **Trusted publisher** -> GitHub Actions, repository `nmindz/stupid-comments`, workflow `release.yaml`, environment `production`. Leave "publish directly" **unchecked** so releases stage rather than publish. npm only offers this on a package that already exists, so version 0.1.5 has to be published manually once.
+- Those three values are matched against the OIDC claim verbatim. `release.yml` and `release.yaml` are different names as far as npm is concerned, and a mismatch mints no token at all: the publish fails with `E401 Unable to authenticate` *after* signing provenance, which reads like a credential problem rather than a naming one.
 - On GitHub: create the `production` environment. Its name must match the OIDC claim exactly.
 - Tag the current version once so semantic-release continues the `0.1.x` line instead of treating the next release as a first one: `git tag -a v0.1.5 -m v0.1.5 && git push origin v0.1.5`.
 

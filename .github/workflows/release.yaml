@@ -15,8 +15,11 @@ on:
 # workflow's identity, so no NPM_TOKEN secret exists to leak or rotate.
 # Configure it once at https://www.npmjs.com/package/stupid-comments/access
 # -> Trusted publisher -> GitHub Actions, repository nmindz/stupid-comments,
-# workflow .github/workflows/release.yml, environment production. The name must
-# match the `environment:` below exactly, or npm rejects the OIDC claim.
+# workflow release.yaml, environment production. npm matches the filename and
+# the environment against the OIDC claim verbatim, so renaming this file or
+# changing `environment:` below without editing the npm record mints no token
+# at all: the publish then fails E401 after signing provenance, which reads
+# like a credential problem rather than a naming one.
 #
 # Leave "publish directly" UNCHECKED under Allowed actions. This job stages the
 # release instead: the tarball and its provenance are uploaded, and the version
