@@ -1,0 +1,5 @@
+# DSH bundle layer. A relative name resolves against this file, so the plugin
+# loads without depending on how the package was installed or named.
+- insert:
+    - id: stupid-comments
+      name: './index.js'

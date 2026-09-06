@@ -74,16 +74,16 @@ fn pre_tool_use(payload: &Value, policy: &Policy) -> Analysis {
         return (Vec::new(), Vec::new());
     };
 
-    let (source, touched) = match tool {
-        "Write" => match input.get("content").and_then(Value::as_str) {
+    let (source, touched) = match Intent::of(tool) {
+        Some(Intent::Write) => match input.get("content").and_then(Value::as_str) {
             Some(c) => (c.to_string(), None),
             None => return (Vec::new(), Vec::new()),
         },
-        "Edit" | "MultiEdit" => match reconstruct(path, input) {
+        Some(Intent::Edit) => match reconstruct(path, input) {
             Some(pair) => pair,
             None => return (Vec::new(), Vec::new()),
         },
-        _ => return (Vec::new(), Vec::new()),
+        None => return (Vec::new(), Vec::new()),
     };
 
     let name = path.display().to_string();
@@ -101,6 +101,25 @@ fn pre_tool_use(payload: &Value, policy: &Policy) -> Analysis {
     (findings, counts)
 }
 
+/// What a tool call is about to do to a file. Harnesses name the same two
+/// operations differently — Claude Code writes `Write`/`Edit`/`MultiEdit`,
+/// DSH writes `write`/`edit` — so the name is matched case-insensitively and
+/// the payload shape below is the part that actually has to agree.
+enum Intent {
+    Write,
+    Edit,
+}
+
+impl Intent {
+    fn of(tool: &str) -> Option<Self> {
+        match tool.to_ascii_lowercase().as_str() {
+            "write" => Some(Self::Write),
+            "edit" | "multiedit" | "multi_edit" => Some(Self::Edit),
+            _ => None,
+        }
+    }
+}
+
 /// Applies the pending edit in memory so rules see whole-file context,
 /// while reporting only lines the edit actually introduced.
 fn reconstruct(path: &Path, input: &Value) -> Option<(String, Option<Vec<(usize, usize)>>)> {
@@ -116,10 +135,26 @@ fn reconstruct(path: &Path, input: &Value) -> Option<(String, Option<Vec<(usize,
     for edit in edits {
         let old = edit.get("old_string").and_then(Value::as_str)?;
         let new = edit.get("new_string").and_then(Value::as_str)?;
-        let at = source.find(old)?;
-        let start_line = source[..at].lines().count().max(1);
-        source.replace_range(at..at + old.len(), new);
-        ranges.push((start_line, start_line + new.lines().count()));
+        let all = edit.get("replace_all").and_then(Value::as_bool) == Some(true);
+        if old.is_empty() {
+            return None;
+        }
+
+        // An edit whose anchor is absent means this reconstruction no longer
+        // matches what the tool will produce, so the gate stands down.
+        let mut from = source.find(old)?;
+        loop {
+            let start_line = source[..from].lines().count().max(1);
+            source.replace_range(from..from + old.len(), new);
+            ranges.push((start_line, start_line + new.lines().count()));
+            if !all {
+                break;
+            }
+            let Some(offset) = source[from + new.len()..].find(old) else {
+                break;
+            };
+            from += new.len() + offset;
+        }
     }
     Some((source, Some(ranges)))
 }

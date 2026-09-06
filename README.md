@@ -1,6 +1,6 @@
 # stupid-comments
 
-**Runtime enforcement for your code comment policy.** A Rust CLI that parses what an LLM is about to write, checks it against *your* policy, and refuses the write when it violates.
+**Runtime enforcement for your code comment policy.** A Rust CLI that parses what an LLM is about to write, checks it against *your* policy, and refuses the write when it violates. It ships as a plugin for both [Claude Code](https://claude.com/claude-code) and [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), off the same binary and the same rules.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.1.5-green.svg)](https://github.com/nmindz/stupid-comments/releases)
@@ -23,14 +23,20 @@ git clone https://github.com/nmindz/stupid-comments && cd stupid-comments
 make install
 ```
 
-Then, inside Claude Code:
+Then register the plugin with whichever harness you run. Inside Claude Code:
 
 ```
 /plugin marketplace add nmindz/stupid-comments
 /plugin install stupid-comments@stupid-comments
 ```
 
-Finally, add a `# Comments Policy` section to `~/.claude/CLAUDE.md` in your own words, and confirm it was picked up:
+Or, for DeepSeek Harness:
+
+```sh
+dsh plugin --profile tui add github:nmindz/stupid-comments
+```
+
+Finally, add a `# Comments Policy` section to your agent memory — `~/.claude/CLAUDE.md` or `~/.dsh/AGENTS.md` — in your own words, and confirm it was picked up:
 
 ```sh
 stupid-comments policy
@@ -58,9 +64,13 @@ Without that section and without a config file, the plugin stays completely sile
 
 ## How it works
 
-Your policy is read from the `# Comments Policy` section of `~/.claude/CLAUDE.md` (any heading level, case-insensitive). That text is quoted verbatim in every rejection, never paraphrased. If no such section and no config file exist, the plugin does nothing at all and says nothing at all.
+Your policy is read from the `# Comments Policy` section of your agent memory (any heading level, case-insensitive). That text is quoted verbatim in every rejection, never paraphrased. If no such section and no config file exist, the plugin does nothing at all and says nothing at all.
 
-**Enforcement is layered.** `PreToolUse` catches Write/Edit/MultiEdit early, reconstructing the post-edit file in memory so rules see whole-file context while reporting only the lines the edit introduced. `Stop` and `SubagentStop` are the real guarantee: they diff the working tree and analyze added lines only, which makes them indifferent to *how* the file was written — heredoc, `sed`, or a subagent all land in the same net.
+**Memory is searched in a fixed order,** and the first file carrying the section wins: `$CLAUDE_CONFIG_DIR/CLAUDE.md` (default `~/.claude/CLAUDE.md`), then `$DSH_HOME/AGENTS.md` (default `~/.dsh/AGENTS.md`), then `$AGENTS_HOME/AGENTS.md` (default `~/.agents/AGENTS.md`), then the nearest `CLAUDE.md` and `AGENTS.md` at or above the file being checked. The order is fixed rather than harness-derived on purpose: a machine running both must not get a different policy depending on which agent asked.
+
+**Enforcement is layered.** The pre-write gate catches Write/Edit/MultiEdit early, reconstructing the post-edit file in memory so rules see whole-file context while reporting only the lines the edit introduced. The stop gate is the real guarantee: it diffs the working tree and analyzes added lines only, which makes it indifferent to *how* the file was written — heredoc, `sed`, or a subagent all land in the same net.
+
+**Both harnesses run the same engine.** Claude Code wires those gates through `PreToolUse`, `Stop`, and `SubagentStop`; DSH wires them through `tools/pre-execute`, `agent/turn-stopping`, and `subagent/end`. Each adapter builds the identical JSON payload and hands it to the same binary, so a rule only ever exists in one place.
 
 **Nothing is judged until it is classified.** Every comment is sorted into `directive`, `license-header`, `doc-comment`, or `prose`, and only `prose` faces the ratio and redundancy rules. Lint pragmas, `go:build` lines, shebangs, SPDX headers, and JSDoc are structurally exempt rather than merely tolerated — and a pragma placed above a comment block never launders the block beneath it.
 
@@ -102,26 +112,36 @@ Verify with `stupid-comments --version`.
 
 ### 2. The plugin
 
-Inside Claude Code:
+**Claude Code:**
 
 ```
 /plugin marketplace add nmindz/stupid-comments
 /plugin install stupid-comments@stupid-comments
 ```
 
-Restart the session so the hooks register. If a policy exists but the CLI is missing, the plugin says so once at session start and enforces nothing.
+**DeepSeek Harness:**
 
-To upgrade later, both pieces move independently:
+```sh
+dsh plugin --profile tui add github:nmindz/stupid-comments
+dsh plugin --profile tui add /path/to/clone   # from a checkout
+```
+
+The package declares a `dsh.bundle` patch, so `dsh plugin add` installs it and reconciles it into that profile's bundle list on its own. Nothing else needs editing.
+
+Restart the session so the hooks register. If a policy exists but the CLI is missing, the plugin says so once and enforces nothing.
+
+To upgrade later, every piece moves independently:
 
 ```sh
 make install
 claude plugin marketplace update stupid-comments
 claude plugin update stupid-comments@stupid-comments
+dsh plugin --profile tui update stupid-comments
 ```
 
 ### 3. A policy
 
-Add a `# Comments Policy` section to `~/.claude/CLAUDE.md` describing, in your own words, how you want comments written. Confirm it was picked up with `stupid-comments policy`.
+Add a `# Comments Policy` section to `~/.claude/CLAUDE.md` or `~/.dsh/AGENTS.md` describing, in your own words, how you want comments written. Confirm it was picked up with `stupid-comments policy`.
 
 To keep the policy somewhere else, point at it with the `prose` config key.
 
@@ -158,12 +178,17 @@ Set up the stupid-comments comment policy enforcer on this machine.
    --version`. If `command -v` does not resolve, the binary went somewhere
    PATH cannot see it — say so plainly instead of reporting success.
 
-4. Tell me to run these two myself, since you cannot run slash commands:
-   /plugin marketplace add nmindz/stupid-comments
-   /plugin install stupid-comments@stupid-comments
+4. Register the plugin with the harness you are running in.
+   In Claude Code, tell me to run these two myself, since you cannot run
+   slash commands:
+     /plugin marketplace add nmindz/stupid-comments
+     /plugin install stupid-comments@stupid-comments
+   In DeepSeek Harness, run it yourself and name the profile you targeted:
+     dsh plugin --profile <profile> add github:nmindz/stupid-comments
 
-5. Read ~/.claude/CLAUDE.md and look for a heading matching "Comments Policy"
-   at any level, case-insensitive. If it is missing, DO NOT invent a policy.
+5. Read my agent memory — ~/.claude/CLAUDE.md, or ~/.dsh/AGENTS.md under
+   DeepSeek Harness — and look for a heading matching "Comments Policy" at
+   any level, case-insensitive. If it is missing, DO NOT invent a policy.
    Show me where the section goes, ask what my rules are, and write exactly
    what I tell you.
 
@@ -198,7 +223,7 @@ Everything here is optional. Drop a `.stupid-comments.jsonc` anywhere at or abov
 | Key | Type | Default | Purpose |
 | --- | --- | --- | --- |
 | `mode` | `shadow` \| `warn` \| `block` | `shadow` | Global severity ceiling. `shadow` reports without blocking |
-| `prose` | path | — | Read the policy from this file instead of `CLAUDE.md`. `~` expands |
+| `prose` | path | — | Read the policy from this file instead of agent memory. `~` expands |
 | `maxProseCommentLines` | integer | `5` | Longest permitted prose comment block |
 | `maxDocCommentLines` | integer | `40` | Longest permitted doc comment |
 | `maxCommentRatio` | float | `0.35` | Share of a file that may be prose comments |
@@ -237,7 +262,7 @@ stupid-comments check [PATH]...     # report findings, change nothing
 stupid-comments check --json        # machine-readable, for CI
 stupid-comments check --adjudicate  # permit deletion as a remedy
 stupid-comments policy              # show the resolved policy and its source
-stupid-comments hook claude         # consume a hook payload on stdin
+stupid-comments hook claude|dsh     # consume a hook payload on stdin
 ```
 
 Every run prints a coverage summary to **stderr**, leaving stdout clean for `--json`:
@@ -258,22 +283,28 @@ A file with no grammar is not a passing file, so it is never folded into the che
 
 ## Slash commands
 
-| Command | Purpose |
-| --- | --- |
-| `/stupid-comments:policy` | Show the policy in force and where it came from |
-| `/stupid-comments:check [path]` | Report findings, change nothing |
-| `/stupid-comments:fix [path]` | Adjudicated sweep of an existing codebase; deletion permitted |
-| `/stupid-comments:off` | How to disarm for a session |
+| Claude Code | DeepSeek Harness | Purpose |
+| --- | --- | --- |
+| `/stupid-comments:policy` | `/stupid-comments-policy` | Show the policy in force and where it came from |
+| `/stupid-comments:check [path]` | `/stupid-comments-check [path]` | Report findings, change nothing |
+| `/stupid-comments:fix [path]` | `/stupid-comments-fix [path]` | Adjudicated sweep of an existing codebase; deletion permitted |
+| `/stupid-comments:off` | `/stupid-comments-off` | How to disarm for a session |
+
+The names differ only because DSH command names cannot carry a colon. The prompts do not: both harnesses read the same markdown files under `plugins/stupid-comments/commands/`, so the wording has exactly one home.
 
 ## Semantic judging
 
 Deterministic rules cannot decide whether a comment earns its place. Setting `"semantic": "warn"` (or `"block"`) sends the prose comments and your policy text to `claude -p`, using the session authentication you already have — there is no API key to configure and none is wanted. Every failure is silent: no `claude` on PATH, a timeout, unparseable output, all mean no findings.
 
+The judge is a subprocess, not a harness binding. Point `semanticCommand` at anything that reads a prompt on stdin and answers with JSON, and it works the same from either plugin.
+
 It is off by default because it spends a model call per checked file. It is also the only rule that catches `// Adds a and b` sitting above `const sum = a + b`, which is probably the comment that made you look for this tool.
 
 ## Escaping it
 
-Set `STUPID_COMMENTS=0` in the session environment. That is deliberately the only mid-session hatch — it lives somewhere the model cannot write, so the enforced party cannot disable its own gate.
+Set `STUPID_COMMENTS=0` in the session environment. That is deliberately the only mid-session hatch — it lives somewhere the model cannot write, so the enforced party cannot disable its own gate. Both plugins honor it, and the DSH one registers no seams at all when it is set.
+
+Permanently: change `mode` in `.stupid-comments.jsonc`, or remove the plugin with `/plugin uninstall stupid-comments@stupid-comments` or `dsh plugin --profile tui remove stupid-comments`.
 
 Suppression pragmas exist, but they are anchored to git:
 
@@ -311,11 +342,15 @@ Requires a Rust toolchain. `make help` lists every target.
 | --- | --- | --- |
 | `make build` | `cargo build --release` | Compile the release binary |
 | `make test` | `cargo test` | Run the test suite |
+| `make dsh-test` | `node plugins/stupid-comments/dsh/test.mjs` | Drive the DSH adapter against the release binary |
 | `make lint` | `cargo clippy --all-targets` | Lint every target |
-| `make validate` | `claude plugin validate plugins/stupid-comments` | Check the plugin manifests |
-| `make check` | all three of the above | Everything CI would run |
+| `make version` | `node scripts/sync-version.mjs X.Y.Z` | Write one version into all five manifests |
+| `make validate` | `claude plugin validate` + `scripts/validate-dsh-manifest.mjs` | Check both plugin manifests |
+| `make check` | all of the above | Everything CI would run |
 | `make install` | `cargo install --path crates/stupid-comments --root ~/.local --force` | Install the binary |
 | `make uninstall` | `cargo uninstall --root ~/.local stupid-comments` | Remove it |
+| `make dsh-install` | `dsh plugin --profile tui add $(pwd)` | Register this checkout with a dsh profile |
+| `make dsh-uninstall` | `dsh plugin --profile tui remove stupid-comments` | Unregister it |
 | `make selfcheck` | `./target/release/stupid-comments check .` | Enforce this repo's policy on itself |
 | `make clean` | `cargo clean` | Remove build artifacts |
 
@@ -328,13 +363,28 @@ crates/stupid-comments/src/
 ├── rules.rs       # the deterministic rules
 ├── semantic.rs    # the opt-in LLM judge
 ├── policy.rs      # config and policy resolution
-├── hook.rs        # Claude Code hook payloads
+├── hook.rs        # hook payloads, shared by every harness
 ├── suppress.rs    # git-anchored pragmas
 ├── session.rs     # cross-turn evasion tracking
 └── main.rs        # CLI
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the commit convention and a walkthrough of adding a language.
+The harness plugins are adapters over that binary, and neither carries a rule of its own:
+
+```
+plugins/stupid-comments/
+├── .claude-plugin/plugin.json   # Claude Code manifest
+├── hooks/hooks.json             # Claude Code hook wiring
+├── commands/*.md                # slash command prompts, read by both harnesses
+└── dsh/
+    ├── index.js                 # DSH cordis plugin: seams, payloads, commands
+    ├── cordis.patch.yml         # the bundle layer dsh composes
+    └── test.mjs                 # drives the adapter against the real binary
+```
+
+`package.json` at the repo root is the DSH bundle manifest: it points `dsh.bundle.patch` at that patch file, which is the whole reason `dsh plugin add` can install this repository directly.
+
+Releases are derived from Conventional Commits by semantic-release, and the npm package is *staged* rather than published: CI authenticates through OIDC trusted publishing and holds no credential that can ship a version on its own, so a human approves the tarball with a 2FA code. See [CONTRIBUTING.md](CONTRIBUTING.md) for the commit convention, the release flow, and a walkthrough of adding a language.
 
 ## Known limits
 
@@ -345,6 +395,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the commit convention and a walkthrou
 - `minProseCommentsForRatio` counts comment *blocks*, not lines, so a file carrying fewer than four separate blocks never trips the ratio rule however much of the file they cover. Long blocks are caught by the length rule instead.
 - Semantic judging costs a model call per checked file, so it is off by default.
 - The `Stop` gate diffs against `HEAD`, so a tree that was already dirty before the session has those earlier changes considered too.
+- DSH also ships a text-editor tool. Its `create` and `str_replace` commands are translated and checked before the write; its `insert` command carries no anchor to reconstruct from, so it falls to the stop gate.
+- Under DSH, `subagent/end` is an observation point rather than a decision point. A subagent that ends on a violation is handed the finding as context; only the parent's own stop gate can force the rewrite.
+- The DSH plugin reports a missing binary the first time a write is about to be checked, not at session start, so a session that never writes code stays silent about it.
 
 ## Contributing
 

@@ -24,9 +24,10 @@ enum Command {
         #[arg(long)]
         adjudicate: bool,
     },
-    /// Handle a hook payload on stdin.
+    /// Handle a hook payload on stdin. Every client speaks the same payload
+    /// dialect; the name is recorded for diagnostics, not for behavior.
     Hook {
-        #[arg(value_parser = ["claude"])]
+        #[arg(value_parser = ["claude", "dsh"])]
         client: String,
     },
     /// Print the resolved policy and where it came from.

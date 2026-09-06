@@ -1,0 +1,70 @@
+{
+  "name": "stupid-comments",
+  "version": "0.1.5",
+  "description": "Enforces your comment policy at write time, inside DeepSeek Harness. Reads the policy from your AGENTS.md or CLAUDE.md, blocks violating writes, and re-injects the policy verbatim so the model stops drifting from it.",
+  "license": "GPL-3.0-or-later",
+  "author": {
+    "name": "nmindz",
+    "url": "https://github.com/nmindz"
+  },
+  "type": "module",
+  "main": "plugins/stupid-comments/dsh/index.js",
+  "exports": {
+    ".": "./plugins/stupid-comments/dsh/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "plugins/stupid-comments/**",
+    "!plugins/stupid-comments/dsh/test.mjs",
+    ".claude-plugin/**",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node plugins/stupid-comments/dsh/test.mjs",
+    "validate": "node --check plugins/stupid-comments/dsh/index.js && node scripts/validate-dsh-manifest.mjs",
+    "version:sync": "node scripts/sync-version.mjs"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.2",
+    "@commitlint/config-conventional": "^21.2.2",
+    "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/exec": "^7.1.0",
+    "@semantic-release/git": "^11.0.1",
+    "@semantic-release/github": "^12.0.9",
+    "@semantic-release/npm": "^13.1.5",
+    "semantic-release": "^25.0.9"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "claude-code",
+    "comments",
+    "policy",
+    "linting",
+    "code-quality",
+    "hooks"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nmindz/stupid-comments.git"
+  },
+  "homepage": "https://github.com/nmindz/stupid-comments#readme",
+  "bugs": {
+    "url": "https://github.com/nmindz/stupid-comments/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./plugins/stupid-comments/dsh/cordis.patch.yml"
+    }
+  }
+}

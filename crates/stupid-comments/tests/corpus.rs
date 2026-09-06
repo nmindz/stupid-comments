@@ -1,7 +1,7 @@
 use stupid_comments::lang::Lang;
 use stupid_comments::policy::{Mode, Policy, Rules};
 use stupid_comments::rules::Severity;
-use stupid_comments::{analyze_source, policy::extract_section};
+use stupid_comments::{analyze_source, hook, policy::extract_section};
 
 fn policy(banned: &[&str]) -> Policy {
     Policy {
@@ -421,6 +421,104 @@ fn a_committed_pragma_survives_every_path_form() {
             "pragma dropped for {arg:?}: {out}"
         );
     }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Isolate policy discovery from the machine running the suite. HOME is left
+/// alone on purpose — another test owns it, and these overrides outrank it.
+fn without_agent_homes(dir: &std::path::Path) {
+    std::env::set_var("CLAUDE_CONFIG_DIR", dir.join("absent-claude"));
+    std::env::set_var("DSH_HOME", dir.join("absent-dsh"));
+    std::env::set_var("AGENTS_HOME", dir.join("absent-agents"));
+}
+
+fn scratch(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("sc-{name}-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn a_project_agents_file_supplies_the_policy() {
+    let dir = scratch("agents-md");
+    without_agent_homes(&dir);
+    std::fs::write(dir.join("AGENTS.md"), "# Comments Policy\n\nEarn the line.\n").unwrap();
+
+    let resolved = stupid_comments::policy::resolve(&dir)
+        .unwrap()
+        .expect("AGENTS.md carries a policy");
+    assert_eq!(resolved.prose, "Earn the line.");
+    assert!(resolved.source.ends_with("AGENTS.md"), "{}", resolved.source);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn either_harness_tool_casing_reaches_the_same_verdict() {
+    let dir = scratch("tool-casing");
+    without_agent_homes(&dir);
+    std::fs::write(dir.join("AGENTS.md"), "# Comments Policy\n\nEarn the line.\n").unwrap();
+    std::fs::write(
+        dir.join(".stupid-comments.jsonc"),
+        r#"{ "mode": "block", "bannedPatterns": ["obviously stupid"] }"#,
+    )
+    .unwrap();
+
+    let file = dir.join("sample.ts");
+    let content = "// this is an obviously stupid comment\nexport const x = 1;\n";
+
+    // Claude Code sends `Write`, DSH sends `write`; the payload is otherwise identical.
+    for tool in ["Write", "write"] {
+        let payload = serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "cwd": dir.to_str().unwrap(),
+            "tool_name": tool,
+            "tool_input": { "file_path": file.to_str().unwrap(), "content": content },
+        });
+        let outcome = hook::run(&payload.to_string()).expect("the hook answers");
+        assert!(outcome.block, "{tool} must be blocked");
+        assert!(outcome.message.contains("banned-pattern"), "{}", outcome.message);
+    }
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_replace_all_edit_is_reconstructed_in_full() {
+    let dir = scratch("replace-all");
+    without_agent_homes(&dir);
+    std::fs::write(dir.join("AGENTS.md"), "# Comments Policy\n\nEarn the line.\n").unwrap();
+    std::fs::write(
+        dir.join(".stupid-comments.jsonc"),
+        r#"{ "mode": "block", "bannedPatterns": ["obviously stupid"] }"#,
+    )
+    .unwrap();
+
+    let file = dir.join("sample.ts");
+    std::fs::write(&file, "// marker\nexport const x = 1;\n// marker\nexport const y = 2;\n").unwrap();
+
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "cwd": dir.to_str().unwrap(),
+        "tool_name": "edit",
+        "tool_input": {
+            "file_path": file.to_str().unwrap(),
+            "old_string": "// marker",
+            "new_string": "// this is an obviously stupid comment",
+            "replace_all": true,
+        },
+    });
+
+    let outcome = hook::run(&payload.to_string()).expect("the hook answers");
+    assert!(outcome.block, "{}", outcome.message);
+    assert_eq!(
+        outcome.message.matches("banned-pattern").count(),
+        2,
+        "every replaced occurrence is reported: {}",
+        outcome.message
+    );
 
     std::fs::remove_dir_all(&dir).ok();
 }

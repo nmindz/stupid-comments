@@ -174,15 +174,40 @@ fn resolve_prose(start: &Path, explicit: Option<&str>) -> Option<(String, String
     None
 }
 
+/// Agent-home memory, then project memory, in a fixed order — the first file
+/// carrying a policy section wins. Every supported harness keeps its own memory
+/// file under its own home, and a machine that runs more than one of them
+/// should not get a different policy depending on which harness asked.
 fn memory_files(start: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    if let Ok(home) = std::env::var("HOME") {
-        out.push(PathBuf::from(&home).join(".claude/CLAUDE.md"));
+    for (var, fallback, name) in AGENT_HOMES {
+        let Some(dir) = agent_home(var, fallback) else {
+            continue;
+        };
+        out.push(dir.join(name));
     }
-    if let Some(local) = find_upward(start, "CLAUDE.md") {
-        out.push(local);
+    for name in PROJECT_MEMORY {
+        if let Some(local) = find_upward(start, name) {
+            out.push(local);
+        }
     }
     out
+}
+
+/// (home override variable, path under $HOME, memory file inside it).
+const AGENT_HOMES: &[(&str, &str, &str)] = &[
+    ("CLAUDE_CONFIG_DIR", ".claude", "CLAUDE.md"),
+    ("DSH_HOME", ".dsh", "AGENTS.md"),
+    ("AGENTS_HOME", ".agents", "AGENTS.md"),
+];
+
+const PROJECT_MEMORY: &[&str] = &["CLAUDE.md", "AGENTS.md"];
+
+fn agent_home(var: &str, fallback: &str) -> Option<PathBuf> {
+    match std::env::var(var) {
+        Ok(dir) if !dir.trim().is_empty() => Some(expand_home(&dir)),
+        _ => Some(PathBuf::from(std::env::var("HOME").ok()?).join(fallback)),
+    }
 }
 
 /// Matches a `# Comments Policy` heading at any level, case-insensitively,
