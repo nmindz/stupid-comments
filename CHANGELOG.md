@@ -2,6 +2,12 @@
 
 Every release is generated from Conventional Commits by semantic-release.
 
+## [0.2.1](https://github.com/nmindz/stupid-comments/compare/v0.2.0...v0.2.1) (2026-09-06)
+
+### Bug Fixes
+
+* **dsh:** stop reading a stale binary's usage error as a block ([efb8dfa](https://github.com/nmindz/stupid-comments/commit/efb8dfa81a3d401f6efec19364965eb328ccf9cf))
+
 ## [0.2.0](https://github.com/nmindz/stupid-comments/compare/v0.1.5...v0.2.0) (2026-09-06)
 
 ### Features

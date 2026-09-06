@@ -1,6 +1,6 @@
 {
   "name": "stupid-comments",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Enforces your comment policy at write time, inside DeepSeek Harness. Reads the policy from your AGENTS.md or CLAUDE.md, blocks violating writes, and re-injects the policy verbatim so the model stops drifting from it.",
   "license": "GPL-3.0-or-later",
   "author": {
