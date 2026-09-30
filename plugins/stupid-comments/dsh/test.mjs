@@ -139,6 +139,11 @@ const CLEAN = 'export const x = 1\n'
   // A view carries no content and must not reach the binary at all.
   const viewed = { ...created, arguments: { command: 'view', path: join(project, 'sample.ts') } }
   assert.equal(await listeners.get('tools/pre-execute')(viewed, () => ALLOWED), ALLOWED)
+
+  // A deletion omits `new_str`, and introduces nothing to police.
+  writeFileSync(join(project, 'sample.ts'), VIOLATION)
+  const deleted = { ...created, arguments: { command: 'str_replace', path: join(project, 'sample.ts'), old_str: 'export const x = 1\n' } }
+  assert.equal(await listeners.get('tools/pre-execute')(deleted, () => ALLOWED), ALLOWED)
 }
 
 // --- An unwatched tool never spawns the binary. ---

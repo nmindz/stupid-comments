@@ -216,7 +216,8 @@ function normalize(exec) {
     return { tool: 'write', input: { file_path: args.path, content: args.file_text } }
   }
   if (args.command === 'str_replace') {
-    return { tool: 'edit', input: { file_path: args.path, old_string: args.old_str, new_string: args.new_str } }
+    // An omitted or null `new_str` is how the tool spells a deletion.
+    return { tool: 'edit', input: { file_path: args.path, old_string: args.old_str, new_string: args.new_str ?? '' } }
   }
   return undefined
 }
