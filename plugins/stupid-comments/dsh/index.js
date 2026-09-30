@@ -64,6 +64,8 @@ export function apply(ctx, config = {}) {
   // may already have dropped it, and without the handle there is no workspace
   // to run the check in.
   const children = new Map()
+  const lifetime = new AbortController()
+  ctx.effect?.(() => () => lifetime.abort(), `${name}: abort detached subagent checks`)
   ctx.on('subagent/start', (info) => {
     const child = ctx.get('agents')?.get(info.id)
     if (child) children.set(info.runId ?? info.id, child)
@@ -73,7 +75,7 @@ export function apply(ctx, config = {}) {
     const child = children.get(key) ?? ctx.get('agents')?.get(info.id)
     children.delete(key)
     if (!child) return
-    void run(child, subagentStopPayload(child, info)).then((outcome) => {
+    void run(child, subagentStopPayload(child, info), lifetime.signal).then((outcome) => {
       if (outcome.message) inject(child, outcome.message, FINDING_SOURCE)
     })
   })
