@@ -217,6 +217,14 @@ const CLEAN = 'export const x = 1\n'
   assertDurableSource(messages[0])
   assert.equal(messages[0].source.form, 'notice')
   assert.ok(messages[0].source.summary.length <= 120, 'a notice summary fits the one-line bound')
+
+  // Claude Code sets stop_hook_active on the stop that follows a forced
+  // continuation; without it a stubborn violation would loop the turn forever.
+  await stopping({ agent, turn: 1, signal: new AbortController().signal })
+  assert.equal(steered.length, 1, 'a turn is forced to continue at most once')
+
+  await stopping({ agent, turn: 2, signal: new AbortController().signal })
+  assert.equal(steered.length, 2, 'the next turn is gated afresh')
 }
 
 // --- A subagent that ends on a violation is told what it left behind. ---

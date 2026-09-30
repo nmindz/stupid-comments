@@ -46,10 +46,18 @@ export function apply(ctx, config = {}) {
 
   // A blocking Stop steers the agent instead of letting it settle, which is
   // how Claude Code's Stop hook forces the model to fix what it just wrote.
-  ctx.on('agent/turn-stopping', async ({ agent, signal }) => {
-    const outcome = await run(agent, stopPayload(agent), signal)
-    if (outcome.block) steer(agent, outcome.message, FINDING_SOURCE)
-    else if (outcome.message) inject(agent, outcome.message, FINDING_SOURCE)
+  // The turn it forced is remembered so the next stop in that same turn
+  // reports `stop_hook_active`, capping it at one forced continuation.
+  const forcedTurn = new WeakMap()
+  ctx.on('agent/turn-stopping', async ({ agent, turn, signal }) => {
+    const active = forcedTurn.get(agent) === turn
+    const outcome = await run(agent, stopPayload(agent, active), signal)
+    if (outcome.block) {
+      forcedTurn.set(agent, turn)
+      steer(agent, outcome.message, FINDING_SOURCE)
+    } else if (outcome.message) {
+      inject(agent, outcome.message, FINDING_SOURCE)
+    }
   })
 
   // A child is retained from its start edge: by the time it ends, the registry
@@ -213,8 +221,8 @@ function normalize(exec) {
   return undefined
 }
 
-function stopPayload(agent) {
-  return { ...base(agent, 'Stop'), stop_hook_active: false }
+function stopPayload(agent, active) {
+  return { ...base(agent, 'Stop'), stop_hook_active: active }
 }
 
 function subagentStopPayload(agent, info) {

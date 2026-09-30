@@ -396,6 +396,7 @@ Releases are derived from Conventional Commits by semantic-release, and the npm 
 - Semantic judging costs a model call per checked file, so it is off by default.
 - The `Stop` gate diffs against `HEAD`, so a tree that was already dirty before the session has those earlier changes considered too.
 - DSH also ships a text-editor tool. Its `create` and `str_replace` commands are translated and checked before the write; its `insert` command carries no anchor to reconstruct from, so it falls to the stop gate.
+- The stop gate forces at most one continuation per turn. The stop that follows a forced continuation reports `stop_hook_active`, so a violation the model cannot fix ends the turn instead of looping it; Claude Code sets that flag itself, and the DSH adapter tracks it per turn.
 - Under DSH, `subagent/end` is an observation point rather than a decision point. A subagent that ends on a violation is handed the finding as context; only the parent's own stop gate can force the rewrite.
 - The DSH plugin reports a missing binary the first time a write is about to be checked, not at session start, so a session that never writes code stays silent about it.
 
