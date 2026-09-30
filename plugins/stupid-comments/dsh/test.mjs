@@ -48,15 +48,25 @@ function createContext() {
 function createAgent() {
   const steered = []
   const injected = []
+  const messages = []
   return {
     steered,
     injected,
+    messages,
     agent: {
       session: { header: { id: 'test-session', cwd: project } },
-      steer: (message) => steered.push(message.content[0].text),
-      inject: (message) => injected.push(message.content[0].text),
+      steer: (message) => { messages.push(message); steered.push(message.content[0].text) },
+      inject: (message) => { messages.push(message); injected.push(message.content[0].text) },
     },
   }
+}
+
+/** Session format v4 refuses a message whose source is the retired plugin wrapper. */
+function assertDurableSource(message) {
+  assert.ok(Object.isFrozen(message) && Object.isFrozen(message.source), 'the message is published frozen')
+  assert.equal(message.role, 'user')
+  assert.equal(message.source.kind, 'stupid-comments', 'the source kind is owned by this plugin')
+  assert.equal('plugin' in message.source, false, 'the retired plugin wrapper field is absent')
 }
 
 /** The subagent seam is detached, so wait for its effect instead of sleeping. */
@@ -175,7 +185,7 @@ const CLEAN = 'export const x = 1\n'
 {
   const { ctx, commands } = createContext()
   apply(ctx, { binary })
-  const { agent, steered } = createAgent()
+  const { agent, steered, messages } = createAgent()
 
   const check = commands.find(c => c.name === 'stupid-comments-check')
   assert.ok(check, 'the check command is registered')
@@ -184,6 +194,8 @@ const CLEAN = 'export const x = 1\n'
   const result = check.handler({ agent, rawInput: '', attachments: [], signal: new AbortController().signal })
   assert.equal(result.kind, 'success')
   assert.match(steered[0], /stupid-comments check \./, 'an omitted argument falls back to the default')
+  assertDurableSource(messages[0])
+  assert.equal(messages[0].source.form, undefined, 'a command prompt is not reported as a finding')
 
   check.handler({ agent, rawInput: ' crates ', attachments: [], signal: new AbortController().signal })
   assert.match(steered[1], /stupid-comments check crates/, 'a supplied argument is substituted')
@@ -196,11 +208,15 @@ const CLEAN = 'export const x = 1\n'
 
   const { ctx, listeners } = createContext()
   apply(ctx, { binary })
-  const { agent, steered } = createAgent()
+  const { agent, steered, messages } = createAgent()
+  const stopping = listeners.get('agent/turn-stopping')
 
-  await listeners.get('agent/turn-stopping')({ agent, turn: 1, signal: new AbortController().signal })
+  await stopping({ agent, turn: 1, signal: new AbortController().signal })
   assert.equal(steered.length, 1, 'the stopping turn is steered back to the violation')
   assert.match(steered[0], /banned-pattern/)
+  assertDurableSource(messages[0])
+  assert.equal(messages[0].source.form, 'notice')
+  assert.ok(messages[0].source.summary.length <= 120, 'a notice summary fits the one-line bound')
 }
 
 // --- A subagent that ends on a violation is told what it left behind. ---

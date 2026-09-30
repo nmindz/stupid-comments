@@ -15,7 +15,11 @@ const DISARM_ENV = 'STUPID_COMMENTS'
 const DEFAULT_BINARY = 'stupid-comments'
 const DEFAULT_TIMEOUT_MS = 15_000
 const BLOCK_EXIT_CODE = 2
-const SOURCE = { kind: 'plugin', plugin: name }
+
+// Session format v4 refuses the retired `{ kind: 'plugin' }` wrapper, so every
+// message carries a kind this plugin owns.
+const SOURCE = { kind: name }
+const FINDING_SOURCE = { kind: name, form: 'notice', summary: 'Comment policy violations in code just written' }
 
 /** Tools whose arguments carry file content the policy applies to. */
 const WATCHED_TOOLS = new Set(['write', 'edit', 'multiedit', 'multi_edit', 'str_replace_editor'])
@@ -36,7 +40,7 @@ export function apply(ctx, config = {}) {
     if (!call) return next()
     const outcome = await run(exec.agent, preToolPayload(exec, call), exec.signal)
     if (outcome.block) return { kind: 'deny', reason: outcome.message }
-    if (outcome.message) inject(exec.agent, outcome.message)
+    if (outcome.message) inject(exec.agent, outcome.message, FINDING_SOURCE)
     return next()
   })
 
@@ -44,8 +48,8 @@ export function apply(ctx, config = {}) {
   // how Claude Code's Stop hook forces the model to fix what it just wrote.
   ctx.on('agent/turn-stopping', async ({ agent, signal }) => {
     const outcome = await run(agent, stopPayload(agent), signal)
-    if (outcome.block) steer(agent, outcome.message)
-    else if (outcome.message) inject(agent, outcome.message)
+    if (outcome.block) steer(agent, outcome.message, FINDING_SOURCE)
+    else if (outcome.message) inject(agent, outcome.message, FINDING_SOURCE)
   })
 
   // A child is retained from its start edge: by the time it ends, the registry
@@ -62,7 +66,7 @@ export function apply(ctx, config = {}) {
     children.delete(key)
     if (!child) return
     void run(child, subagentStopPayload(child, info)).then((outcome) => {
-      if (outcome.message) inject(child, outcome.message)
+      if (outcome.message) inject(child, outcome.message, FINDING_SOURCE)
     })
   })
 
@@ -73,7 +77,7 @@ export function apply(ctx, config = {}) {
         description: command.description,
         ...command.hint ? { input: { hint: command.hint } } : {},
         handler: (invocation) => {
-          steer(invocation.agent, expand(command.body, invocation.rawInput))
+          steer(invocation.agent, expand(command.body, invocation.rawInput), SOURCE)
           return { kind: 'success', text: `Running ${command.slug} against the comment policy.` }
         },
       })
@@ -224,12 +228,12 @@ function workspaceOf(agent) {
 // --- Model-facing messages. Built inline so the plugin stays dependency-free
 // and installable into any profile. ---
 
-function userMessage(text) {
+function userMessage(text, source) {
   return deepFreeze({
     id: randomUUID(),
     role: 'user',
     content: [{ type: 'text', text }],
-    source: SOURCE,
+    source: { ...source },
   })
 }
 
@@ -241,15 +245,15 @@ function deepFreeze(value) {
   return Object.freeze(value)
 }
 
-function steer(agent, text) {
+function steer(agent, text, source) {
   try {
-    agent?.steer(userMessage(text))
+    agent?.steer(userMessage(text, source))
   } catch {}
 }
 
-function inject(agent, text) {
+function inject(agent, text, source) {
   try {
-    agent?.inject(userMessage(text))
+    agent?.inject(userMessage(text, source))
   } catch {}
 }
 
