@@ -1,6 +1,6 @@
 {
   "name": "stupid-comments",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Enforces your comment policy at write time, inside DeepSeek Harness. Reads the policy from your AGENTS.md or CLAUDE.md, blocks violating writes, and re-injects the policy verbatim so the model stops drifting from it.",
   "license": "GPL-3.0-or-later",
   "author": {
@@ -35,10 +35,18 @@
     "@deepseek-ai/dsh-tools": ">=0.2.0-0 <0.3.0-0"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-agent": { "optional": true },
-    "@deepseek-ai/dsh-commands": { "optional": true },
-    "@deepseek-ai/dsh-subagent": { "optional": true },
-    "@deepseek-ai/dsh-tools": { "optional": true }
+    "@deepseek-ai/dsh-agent": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-commands": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-subagent": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public",
