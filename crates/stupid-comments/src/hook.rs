@@ -144,9 +144,8 @@ fn reconstruct(path: &Path, input: &Value) -> Option<(String, Option<Vec<(usize,
         // matches what the tool will produce, so the gate stands down.
         let mut from = source.find(old)?;
         loop {
-            let start_line = source[..from].lines().count().max(1);
             source.replace_range(from..from + old.len(), new);
-            ranges.push((start_line, start_line + new.lines().count()));
+            ranges.push(touched_lines(&source, from, new));
             if !all {
                 break;
             }
@@ -157,6 +156,14 @@ fn reconstruct(path: &Path, input: &Value) -> Option<(String, Option<Vec<(usize,
         }
     }
     Some((source, Some(ranges)))
+}
+
+/// The 1-based lines `new` occupies once spliced in at byte `from`. A trailing
+/// newline ends the last line rather than opening the next one.
+fn touched_lines(source: &str, from: usize, new: &str) -> (usize, usize) {
+    let start = source[..from].matches('\n').count() + 1;
+    let breaks = new.matches('\n').count() - usize::from(new.ends_with('\n'));
+    (start, start + breaks)
 }
 
 fn intersects(f: &Finding, ranges: &[(usize, usize)]) -> bool {

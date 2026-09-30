@@ -522,3 +522,44 @@ fn a_replace_all_edit_is_reconstructed_in_full() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn an_edit_answers_only_for_the_lines_it_rewrites() {
+    let dir = scratch("edit-bounds");
+    without_agent_homes(&dir);
+    std::fs::write(dir.join("AGENTS.md"), "# Comments Policy\n\nEarn the line.\n").unwrap();
+    std::fs::write(
+        dir.join(".stupid-comments.jsonc"),
+        r#"{ "mode": "block", "bannedPatterns": ["obviously stupid"] }"#,
+    )
+    .unwrap();
+
+    let file = dir.join("sample.ts");
+    let original = "// this is an obviously stupid comment\nexport const x = 1;\nexport const y = 2;\n// another obviously stupid comment\n";
+    let edit = |old: &str, new: &str| {
+        std::fs::write(&file, original).unwrap();
+        let payload = serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "cwd": dir.to_str().unwrap(),
+            "tool_name": "edit",
+            "tool_input": { "file_path": file.to_str().unwrap(), "old_string": old, "new_string": new },
+        });
+        hook::run(&payload.to_string()).expect("the hook answers")
+    };
+
+    // Each edit sits between two violations it did not write.
+    for (old, new) in [
+        ("export const x = 1;\n", "export const x = 3;\n"),
+        ("export const y = 2;\n", "export const y = 4;\n"),
+        ("export const x = 1;\n", ""),
+    ] {
+        let outcome = edit(old, new);
+        assert!(!outcome.block, "{old:?} -> {new:?} was blamed for a neighbour: {}", outcome.message);
+    }
+
+    let outcome = edit("export const y = 2;\n", "// yet another obviously stupid remark\nexport const y = 2;\n");
+    assert!(outcome.block, "a violation the edit did write is still caught");
+    assert_eq!(outcome.message.matches("banned-pattern").count(), 1, "{}", outcome.message);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
