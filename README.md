@@ -128,6 +128,8 @@ dsh plugin --profile tui add /path/to/clone   # from a checkout
 
 The package declares a `dsh.bundle` patch, so `dsh plugin add` installs it and reconciles it into that profile's bundle list on its own. Nothing else needs editing.
 
+It targets DeepSeek Harness 0.2.x. The range is declared through optional `@deepseek-ai/dsh-*` peer dependencies, which is the check dsh itself enforces: a dsh outside that range refuses the install until you grant `dsh plugin allow-version`. The 0.2 line matters because its session format refuses messages attributed to the retired `plugin` source kind, which is what releases up to 0.2.1 sent.
+
 Restart the session so the hooks register. If a policy exists but the CLI is missing, the plugin says so once and enforces nothing.
 
 To upgrade later, every piece moves independently:

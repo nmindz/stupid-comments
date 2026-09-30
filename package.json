@@ -28,6 +28,18 @@
   "engines": {
     "node": ">=22.13.0"
   },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-agent": ">=0.2.0-0 <0.3.0-0",
+    "@deepseek-ai/dsh-commands": ">=0.2.0-0 <0.3.0-0",
+    "@deepseek-ai/dsh-subagent": ">=0.2.0-0 <0.3.0-0",
+    "@deepseek-ai/dsh-tools": ">=0.2.0-0 <0.3.0-0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-agent": { "optional": true },
+    "@deepseek-ai/dsh-commands": { "optional": true },
+    "@deepseek-ai/dsh-subagent": { "optional": true },
+    "@deepseek-ai/dsh-tools": { "optional": true }
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
