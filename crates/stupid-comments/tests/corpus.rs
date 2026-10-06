@@ -628,6 +628,50 @@ fn a_later_edit_above_an_earlier_one_moves_its_lines() {
 }
 
 #[test]
+fn a_blocked_write_sets_no_comment_baseline() {
+    let dir = scratch("blocked-baseline");
+    std::fs::write(dir.join("AGENTS.md"), "# Comments Policy\n\nEarn the line.\n").unwrap();
+    std::fs::write(
+        dir.join(".stupid-comments.jsonc"),
+        r#"{ "mode": "block", "bannedPatterns": ["obviously stupid"] }"#,
+    )
+    .unwrap();
+    let file = dir.join("sample.ts");
+
+    // A subprocess keeps the session tracker's HOME away from the other tests.
+    let hook = |content: &str| {
+        let payload = serde_json::json!({
+            "session_id": "baseline",
+            "hook_event_name": "PreToolUse",
+            "cwd": dir.to_str().unwrap(),
+            "tool_name": "Write",
+            "tool_input": { "file_path": file.to_str().unwrap(), "content": content },
+        });
+        let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_stupid-comments"))
+            .args(["hook", "claude"])
+            .env("HOME", &dir)
+            .env("CLAUDE_CONFIG_DIR", dir.join("absent"))
+            .env("DSH_HOME", dir.join("absent"))
+            .env("PI_CODING_AGENT_DIR", dir.join("absent"))
+            .env("AGENTS_HOME", dir.join("absent"))
+            .stdin(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("binary runs");
+        use std::io::Write;
+        child.stdin.take().unwrap().write_all(payload.to_string().as_bytes()).unwrap();
+        String::from_utf8_lossy(&child.wait_with_output().unwrap().stderr).into_owned()
+    };
+
+    assert!(hook("// this is an obviously stupid comment\nexport const x = 1;\n").contains("banned-pattern"));
+    // The blocked write never landed, so writing the file bare strips nothing.
+    let second = hook("export const x = 1;\n");
+    assert!(!second.contains("comments-removed"), "{second}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn deleting_whole_lines_blames_the_line_below_for_nothing() {
     let dir = scratch("line-delete");
     without_agent_homes(&dir);

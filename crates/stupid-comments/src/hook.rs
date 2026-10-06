@@ -32,7 +32,8 @@ pub fn run(input: &str) -> Result<Outcome> {
         return Ok(quiet);
     };
 
-    let (mut findings, counts) = match payload.get("hook_event_name").and_then(Value::as_str) {
+    let event = payload.get("hook_event_name").and_then(Value::as_str);
+    let (mut findings, mut counts) = match event {
         Some("PreToolUse") => pre_tool_use(&payload, &policy),
         Some("Stop") | Some("SubagentStop") => {
             if payload.get("stop_hook_active").and_then(Value::as_bool) == Some(true) {
@@ -42,6 +43,11 @@ pub fn run(input: &str) -> Result<Outcome> {
         }
         _ => (Vec::new(), Vec::new()),
     };
+
+    // A blocked write never lands, so its comments must not become the baseline.
+    if event == Some("PreToolUse") && findings.iter().any(|f| f.severity == Severity::Block) {
+        counts.clear();
+    }
 
     if let Some(id) = payload.get("session_id").and_then(Value::as_str) {
         if let Some(mut tracker) = Tracker::load(id) {
