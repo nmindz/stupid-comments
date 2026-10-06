@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -71,8 +71,12 @@ function createContext({ cwd = project, idle = true, hasUI = true } = {}) {
   }
 }
 
-function toolCall(toolName, input) {
-  return { type: 'tool_call', toolCallId: 'call-1', toolName, input }
+function toolCall(toolName, input, toolCallId = 'call-1') {
+  return { type: 'tool_call', toolCallId, toolName, input }
+}
+
+function toolResult(toolCallId, toolName, input, { isError = false, content = [{ type: 'text', text: 'ok' }] } = {}) {
+  return { type: 'tool_result', toolCallId, toolName, input, content, isError, details: undefined }
 }
 
 function settle(outcome = 'completed', entries = []) {
@@ -182,7 +186,7 @@ assert.equal(typeof extension, 'function', 'Pi loads a default-exported factory'
   assert.equal(deleted, undefined, 'deleting a line does not blame the one that slides into its place')
 }
 
-// --- omp's edit modes: `replace` is checked, hashline falls to the stop gate. ---
+// --- omp's edit modes: `replace` is pre-checked; hashline is checked on tool_result. ---
 {
   const { pi, emit } = createPi()
   apply(pi, { binary })
@@ -193,9 +197,62 @@ assert.equal(typeof extension, 'function', 'Pi loads a default-exported factory'
   const replace = await emit('tool_call', toolCall('edit', { path: file, old_string: CLEAN, new_string: VIOLATION }), ctx)
   assert.equal(replace?.block, true, 'an omp replace-mode edit that writes a banned comment is blocked')
 
-  // omp derives `path` from the hashline header; the payload carries no anchors.
-  const hashline = { input: `@@ ${file}#a1b2\n+// this is an obviously stupid comment\n`, path: file, paths: [file] }
-  assert.equal(await emit('tool_call', toolCall('edit', hashline), ctx), undefined, 'a hashline edit is left to the stop gate')
+  const hashline = {
+    input: `[omp-edited.ts#a1b2]\nPUT 1.=1:\n+// this is an obviously stupid comment\nexport const x = 1\n`,
+    path: file,
+  }
+  assert.equal(await emit('tool_call', toolCall('edit', hashline), ctx), undefined, 'a hashline edit is not blocked before execution')
+  writeFileSync(file, VIOLATION)
+  const blocked = await emit('tool_result', toolResult('call-1', 'edit', hashline), ctx)
+  assert.equal(blocked?.isError, true, 'a violating hashline edit is reverted and returned as an error')
+  assert.match(blocked.content[0].text, /reverted/i)
+  assert.equal(readFileSync(file, 'utf8'), CLEAN, 'the hashline edit is rolled back on block')
+
+  writeFileSync(file, CLEAN)
+  const cleanPatch = { input: `[omp-edited.ts#b2c3]\nPUT 1.=1:\n+export const x = 2\n`, path: file }
+  assert.equal(await emit('tool_call', toolCall('edit', cleanPatch, 'call-2'), ctx), undefined)
+  writeFileSync(file, 'export const x = 2\n')
+  assert.equal(await emit('tool_result', toolResult('call-2', 'edit', cleanPatch), ctx), undefined, 'a clean hashline edit passes untouched')
+  assert.equal(readFileSync(file, 'utf8'), 'export const x = 2\n')
+}
+
+// --- Hashline `MV` restores source and removes destination on block. ---
+{
+  const { pi, emit } = createPi()
+  apply(pi, { binary })
+  const { ctx } = createContext()
+  const src = join(project, 'mv-src.ts')
+  const dest = join(project, 'mv-dest.ts')
+  writeFileSync(src, CLEAN)
+  try { unlinkSync(dest) } catch {}
+
+  const mv = {
+    input: `[mv-src.ts#c3d4]\nPUT 1.=1:\n+export const x = 1\nMV mv-dest.ts\n`,
+    path: src,
+  }
+  assert.equal(await emit('tool_call', toolCall('edit', mv, 'call-mv'), ctx), undefined)
+  writeFileSync(dest, VIOLATION)
+  try { unlinkSync(src) } catch {}
+  const blocked = await emit('tool_result', toolResult('call-mv', 'edit', mv), ctx)
+  assert.equal(blocked?.isError, true)
+  assert.equal(readFileSync(src, 'utf8'), CLEAN, 'the move source is restored')
+  assert.equal(existsSync(dest), false, 'the move destination is removed on block')
+}
+
+// --- Revert on block: a file the patch created must not survive. ---
+{
+  const { pi, emit } = createPi()
+  apply(pi, { binary })
+  const { ctx } = createContext()
+  const added = join(project, 'patch-added.ts')
+  try { unlinkSync(added) } catch {}
+
+  const patch = { input: '*** Begin Patch\n*** Add File: patch-added.ts\n+// this is an obviously stupid comment\nexport const x = 1\n*** End Patch\n' }
+  assert.equal(await emit('tool_call', toolCall('apply_patch', patch, 'call-add'), ctx), undefined)
+  writeFileSync(added, VIOLATION)
+  const blocked = await emit('tool_result', toolResult('call-add', 'apply_patch', patch), ctx)
+  assert.equal(blocked?.isError, true)
+  assert.equal(existsSync(added), false, 'a blocked add-file patch leaves no file behind')
 }
 
 // --- omp's session_stop seam blocks with the Claude Code decision shape. ---
