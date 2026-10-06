@@ -144,8 +144,14 @@ fn reconstruct(path: &Path, input: &Value) -> Option<(String, Option<Vec<(usize,
         // matches what the tool will produce, so the gate stands down.
         let mut from = source.find(old)?;
         loop {
+            let line = source[..from].matches('\n').count() + 1;
+            let whole_lines = from == 0 || source.as_bytes()[from - 1] == b'\n';
             source.replace_range(from..from + old.len(), new);
-            ranges.push(touched_lines(&source, from, new));
+            shift(&mut ranges, line, line + span(old), line_delta(old, new));
+            // Whole lines deleted outright leave nothing behind to answer for.
+            if !(new.is_empty() && whole_lines && old.ends_with('\n')) {
+                ranges.push(touched_lines(&source, from, new));
+            }
             if !all {
                 break;
             }
@@ -162,8 +168,32 @@ fn reconstruct(path: &Path, input: &Value) -> Option<(String, Option<Vec<(usize,
 /// newline ends the last line rather than opening the next one.
 fn touched_lines(source: &str, from: usize, new: &str) -> (usize, usize) {
     let start = source[..from].matches('\n').count() + 1;
-    let breaks = new.matches('\n').count() - usize::from(new.ends_with('\n'));
-    (start, start + breaks)
+    (start, start + span(new))
+}
+
+/// Lines a text runs onto past its first; a trailing newline ends the last one.
+fn span(text: &str) -> usize {
+    text.matches('\n').count() - usize::from(text.ends_with('\n'))
+}
+
+fn line_delta(old: &str, new: &str) -> isize {
+    new.matches('\n').count() as isize - old.matches('\n').count() as isize
+}
+
+/// Keeps earlier edits' ranges pointing at their own lines once a later edit
+/// rewriting `line..=last` grows or shrinks the file above them. A range wholly
+/// inside the rewrite is gone; whatever replaced it is the later edit's own.
+fn shift(ranges: &mut Vec<(usize, usize)>, line: usize, last: usize, delta: isize) {
+    ranges.retain(|&(start, end)| start < line || end > last);
+    let moved = |n: usize| n.saturating_add_signed(delta).max(line);
+    for (start, end) in ranges.iter_mut() {
+        if *start > line {
+            *start = moved(*start);
+            *end = moved(*end);
+        } else if *end >= line {
+            *end = moved(*end).max(*start);
+        }
+    }
 }
 
 fn intersects(f: &Finding, ranges: &[(usize, usize)]) -> bool {

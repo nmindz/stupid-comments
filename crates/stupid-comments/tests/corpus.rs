@@ -563,3 +563,105 @@ fn an_edit_answers_only_for_the_lines_it_rewrites() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_later_edit_above_an_earlier_one_moves_its_lines() {
+    let dir = scratch("edit-order");
+    without_agent_homes(&dir);
+    std::fs::write(dir.join("AGENTS.md"), "# Comments Policy\n\nEarn the line.\n").unwrap();
+    std::fs::write(
+        dir.join(".stupid-comments.jsonc"),
+        r#"{ "mode": "block", "bannedPatterns": ["obviously stupid"] }"#,
+    )
+    .unwrap();
+
+    let file = dir.join("sample.ts");
+    std::fs::write(
+        &file,
+        "export const a = 1;\nexport const b = 2;\n// this is an obviously stupid comment\nexport const c = 3;\n",
+    )
+    .unwrap();
+
+    // The second edit grows the file above the first, pushing the untouched
+    // violation onto the line the first edit was recorded at.
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "cwd": dir.to_str().unwrap(),
+        "tool_name": "MultiEdit",
+        "tool_input": {
+            "file_path": file.to_str().unwrap(),
+            "edits": [
+                { "old_string": "export const c = 3;", "new_string": "export const c = 4;" },
+                { "old_string": "export const a = 1;\n", "new_string": "export const a = 1;\nexport const z = 0;\n" },
+            ],
+        },
+    });
+    let outcome = hook::run(&payload.to_string()).expect("the hook answers");
+    assert!(!outcome.block, "an untouched neighbour was blamed: {}", outcome.message);
+
+    // Sequential edits may rewrite what an earlier one wrote. Shrinking it must
+    // not drag the earlier range onto the violation above.
+    std::fs::write(
+        &file,
+        "export const a = 1;\n// this is an obviously stupid comment\nexport const b = 2;\nexport const c = 3;\n",
+    )
+    .unwrap();
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "cwd": dir.to_str().unwrap(),
+        "tool_name": "MultiEdit",
+        "tool_input": {
+            "file_path": file.to_str().unwrap(),
+            "edits": [
+                { "old_string": "export const c = 3;\n", "new_string": "export const c = 3;\nexport const z = 0;\n" },
+                {
+                    "old_string": "export const b = 2;\nexport const c = 3;\nexport const z = 0;\n",
+                    "new_string": "export const bcz = 5;\n",
+                },
+            ],
+        },
+    });
+    let outcome = hook::run(&payload.to_string()).expect("the hook answers");
+    assert!(!outcome.block, "a rewritten edit's range escaped upward: {}", outcome.message);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn deleting_whole_lines_blames_the_line_below_for_nothing() {
+    let dir = scratch("line-delete");
+    without_agent_homes(&dir);
+    std::fs::write(dir.join("AGENTS.md"), "# Comments Policy\n\nEarn the line.\n").unwrap();
+    std::fs::write(
+        dir.join(".stupid-comments.jsonc"),
+        r#"{ "mode": "block", "bannedPatterns": ["obviously stupid"] }"#,
+    )
+    .unwrap();
+
+    let file = dir.join("sample.ts");
+    let original = "export const a = 1;\nexport const b = 2;\n// this is an obviously stupid comment\nexport const c = 3;\n";
+    let check = |edits: serde_json::Value| {
+        std::fs::write(&file, original).unwrap();
+        let payload = serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "cwd": dir.to_str().unwrap(),
+            "tool_name": "MultiEdit",
+            "tool_input": { "file_path": file.to_str().unwrap(), "edits": edits },
+        });
+        hook::run(&payload.to_string()).expect("the hook answers")
+    };
+
+    let outcome = check(serde_json::json!([
+        { "old_string": "export const b = 2;\n", "new_string": "" },
+    ]));
+    assert!(!outcome.block, "the line sliding up was blamed: {}", outcome.message);
+
+    // An earlier edit's line deleted by a later one leaves no range behind.
+    let outcome = check(serde_json::json!([
+        { "old_string": "export const b = 2;", "new_string": "export const b = 3;" },
+        { "old_string": "export const b = 3;\n", "new_string": "" },
+    ]));
+    assert!(!outcome.block, "a deleted edit's range outlived its line: {}", outcome.message);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
