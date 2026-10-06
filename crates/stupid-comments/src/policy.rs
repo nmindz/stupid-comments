@@ -180,11 +180,14 @@ fn resolve_prose(start: &Path, explicit: Option<&str>) -> Option<(String, String
 /// should not get a different policy depending on which harness asked.
 fn memory_files(start: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for (var, fallback, name) in AGENT_HOMES {
+    for (var, fallback, names) in AGENT_HOMES {
         let Some(dir) = agent_home(var, fallback) else {
             continue;
         };
-        out.push(dir.join(name));
+        // A harness loads the first of its candidates, so that one alone speaks for it.
+        if let Some(file) = names.iter().map(|n| dir.join(n)).find(|f| f.is_file()) {
+            out.push(file);
+        }
     }
     for name in PROJECT_MEMORY {
         if let Some(local) = find_upward(start, name) {
@@ -194,11 +197,18 @@ fn memory_files(start: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// (home override variable, path under $HOME, memory file inside it).
-const AGENT_HOMES: &[(&str, &str, &str)] = &[
-    ("CLAUDE_CONFIG_DIR", ".claude", "CLAUDE.md"),
-    ("DSH_HOME", ".dsh", "AGENTS.md"),
-    ("AGENTS_HOME", ".agents", "AGENTS.md"),
+/// (home override variable, path under $HOME, memory files in the order the
+/// harness reads them). Pi and omp share one override variable.
+const AGENT_HOMES: &[(&str, &str, &[&str])] = &[
+    ("CLAUDE_CONFIG_DIR", ".claude", &["CLAUDE.md"]),
+    ("DSH_HOME", ".dsh", &["AGENTS.md"]),
+    (
+        "PI_CODING_AGENT_DIR",
+        ".pi/agent",
+        &["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"],
+    ),
+    ("PI_CODING_AGENT_DIR", ".omp/agent", &["AGENTS.md"]),
+    ("AGENTS_HOME", ".agents", &["AGENTS.md"]),
 ];
 
 const PROJECT_MEMORY: &[&str] = &["CLAUDE.md", "AGENTS.md"];
@@ -226,7 +236,11 @@ pub fn extract_section(markdown: &str) -> Option<String> {
 }
 
 fn expand_home(path: &str) -> PathBuf {
-    match (path.strip_prefix("~/"), std::env::var("HOME")) {
+    let rest = match path {
+        "~" => Some(""),
+        _ => path.strip_prefix("~/"),
+    };
+    match (rest, std::env::var("HOME")) {
         (Some(rest), Ok(home)) => PathBuf::from(home).join(rest),
         _ => PathBuf::from(path),
     }

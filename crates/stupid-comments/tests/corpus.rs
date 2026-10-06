@@ -430,6 +430,7 @@ fn a_committed_pragma_survives_every_path_form() {
 fn without_agent_homes(dir: &std::path::Path) {
     std::env::set_var("CLAUDE_CONFIG_DIR", dir.join("absent-claude"));
     std::env::set_var("DSH_HOME", dir.join("absent-dsh"));
+    std::env::set_var("PI_CODING_AGENT_DIR", dir.join("absent-pi"));
     std::env::set_var("AGENTS_HOME", dir.join("absent-agents"));
 }
 
@@ -451,6 +452,40 @@ fn a_project_agents_file_supplies_the_policy() {
         .expect("AGENTS.md carries a policy");
     assert_eq!(resolved.prose, "Earn the line.");
     assert!(resolved.source.ends_with("AGENTS.md"), "{}", resolved.source);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_pi_agent_home_outranks_the_shared_one() {
+    let dir = scratch("pi-home");
+    let pi = dir.join("pi-agent");
+    let shared = dir.join("agents");
+    let project = dir.join("project");
+    for d in [&pi, &shared, &project] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    std::fs::write(pi.join("AGENTS.md"), "# Comments Policy\n\nPi's words.\n").unwrap();
+    std::fs::write(shared.join("AGENTS.md"), "# Comments Policy\n\nShared words.\n").unwrap();
+
+    // A subprocess keeps these overrides out of the tests sharing this process.
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_stupid-comments"))
+        .arg("policy")
+        .current_dir(&project)
+        .env("HOME", &dir)
+        .env("CLAUDE_CONFIG_DIR", dir.join("absent-claude"))
+        .env("DSH_HOME", dir.join("absent-dsh"))
+        .env("PI_CODING_AGENT_DIR", &pi)
+        .env("AGENTS_HOME", &shared)
+        .output()
+        .expect("binary runs");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let source = pi.join("AGENTS.md");
+    assert!(
+        stdout.contains(&format!("source: {}", source.display())),
+        "{stdout}"
+    );
+    assert!(stdout.contains("Pi's words."), "{stdout}");
 
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -706,6 +741,63 @@ fn deleting_whole_lines_blames_the_line_below_for_nothing() {
         { "old_string": "export const b = 3;\n", "new_string": "" },
     ]));
     assert!(!outcome.block, "a deleted edit's range outlived its line: {}", outcome.message);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Runs `stupid-comments policy` in `project` under `env`, with every agent
+/// home not named in it pointed somewhere absent.
+fn policy_source(dir: &std::path::Path, project: &std::path::Path, env: &[(&str, &std::path::Path)]) -> String {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_stupid-comments"));
+    command.arg("policy").current_dir(project).env("HOME", dir);
+    for var in ["CLAUDE_CONFIG_DIR", "DSH_HOME", "PI_CODING_AGENT_DIR", "AGENTS_HOME"] {
+        command.env(var, dir.join(format!("absent-{var}")));
+    }
+    for (var, value) in env {
+        command.env(var, value);
+    }
+    let out = command.output().expect("binary runs");
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn a_pi_agent_home_answers_with_the_file_pi_loads() {
+    let dir = scratch("pi-override");
+    let pi = dir.join("pi-agent");
+    let project = dir.join("project");
+    std::fs::create_dir_all(&pi).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+
+    std::fs::write(pi.join("CLAUDE.md"), "# Comments Policy\n\nFrom CLAUDE.md.\n").unwrap();
+    let out = policy_source(&dir, &project, &[("PI_CODING_AGENT_DIR", &pi)]);
+    assert!(out.contains("From CLAUDE.md."), "Pi falls back to CLAUDE.md: {out}");
+
+    // Pi loads the override instead of the rest, so its policy is the one in force.
+    std::fs::write(pi.join("AGENTS.override.md"), "# Comments Policy\n\nFrom the override.\n").unwrap();
+    let out = policy_source(&dir, &project, &[("PI_CODING_AGENT_DIR", &pi)]);
+    assert!(out.contains("From the override."), "{out}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_omp_agent_home_supplies_the_policy() {
+    let dir = scratch("omp-home");
+    let omp = dir.join(".omp/agent");
+    let project = dir.join("project");
+    std::fs::create_dir_all(&omp).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(omp.join("AGENTS.md"), "# Comments Policy\n\nFrom omp.\n").unwrap();
+
+    // omp shares Pi's override variable; unset, it lives under ~/.omp/agent.
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_stupid-comments"));
+    command.arg("policy").current_dir(&project).env("HOME", &dir).env_remove("PI_CODING_AGENT_DIR");
+    for var in ["CLAUDE_CONFIG_DIR", "DSH_HOME", "AGENTS_HOME"] {
+        command.env(var, dir.join(format!("absent-{var}")));
+    }
+    let out = String::from_utf8_lossy(&command.output().expect("binary runs").stdout).into_owned();
+    assert!(out.contains("From omp."), "{out}");
+    assert!(out.contains(&omp.join("AGENTS.md").display().to_string()), "{out}");
 
     std::fs::remove_dir_all(&dir).ok();
 }
