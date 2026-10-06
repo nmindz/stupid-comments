@@ -491,6 +491,27 @@ fn the_pi_agent_home_outranks_the_shared_one() {
 }
 
 #[test]
+fn every_client_answers_an_empty_payload() {
+    // The adapters' handshake: a client the parser rejects exits 2, which reads as a block.
+    for client in ["claude", "dsh", "pi"] {
+        let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_stupid-comments"))
+            .args(["hook", client])
+            .stdin(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("binary runs");
+        use std::io::Write;
+        child.stdin.take().unwrap().write_all(b"{}").unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "hook {client}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+#[test]
 fn either_harness_tool_casing_reaches_the_same_verdict() {
     let dir = scratch("tool-casing");
     without_agent_homes(&dir);

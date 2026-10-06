@@ -57,7 +57,7 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "node scripts/sync-version.mjs ${nextRelease.version} && node scripts/validate-dsh-manifest.mjs",
+        "prepareCmd": "node scripts/sync-version.mjs ${nextRelease.version} && node scripts/validate-dsh-manifest.mjs && node scripts/validate-pi-manifest.mjs",
         "publishCmd": "npm stage publish --access public --provenance --ignore-scripts"
       }
     ],

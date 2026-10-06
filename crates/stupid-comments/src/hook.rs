@@ -109,8 +109,8 @@ fn pre_tool_use(payload: &Value, policy: &Policy) -> Analysis {
 
 /// What a tool call is about to do to a file. Harnesses name the same two
 /// operations differently — Claude Code writes `Write`/`Edit`/`MultiEdit`,
-/// DSH writes `write`/`edit` — so the name is matched case-insensitively and
-/// the payload shape below is the part that actually has to agree.
+/// DSH and Pi write `write`/`edit` — so the name is matched case-insensitively
+/// and the payload shape below is the part that actually has to agree.
 enum Intent {
     Write,
     Edit,

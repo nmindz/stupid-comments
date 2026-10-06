@@ -1,6 +1,6 @@
 # stupid-comments
 
-**Runtime enforcement for your code comment policy.** A Rust CLI that parses what an LLM is about to write, checks it against *your* policy, and refuses the write when it violates. It ships as a plugin for both [Claude Code](https://claude.com/claude-code) and [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), off the same binary and the same rules.
+**Runtime enforcement for your code comment policy.** A Rust CLI that parses what an LLM is about to write, checks it against *your* policy, and refuses the write when it violates. It ships as a plugin for [Claude Code](https://claude.com/claude-code), [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), [Pi](https://github.com/earendil-works/pi/tree/main/packages/coding-agent), and Pi's [oh-my-pi](https://github.com/can1357/oh-my-pi) fork (the `omp` TUI and [omp-web](https://github.com/ddallabenetta/omp-web)), off the same binary and the same rules.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.1.5-green.svg)](https://github.com/nmindz/stupid-comments/releases)
@@ -36,7 +36,19 @@ Or, for DeepSeek Harness:
 dsh plugin --profile tui add github:nmindz/stupid-comments
 ```
 
-Finally, add a `# Comments Policy` section to your agent memory — `~/.claude/CLAUDE.md` or `~/.dsh/AGENTS.md` — in your own words, and confirm it was picked up:
+Or, for Pi:
+
+```sh
+pi install git:github.com/nmindz/stupid-comments
+```
+
+Or, for oh-my-pi, which covers both the `omp` TUI and omp-web:
+
+```sh
+omp plugin install github:nmindz/stupid-comments
+```
+
+Finally, add a `# Comments Policy` section to your agent memory — `~/.claude/CLAUDE.md`, `~/.dsh/AGENTS.md`, `~/.pi/agent/AGENTS.md`, or `~/.omp/agent/AGENTS.md` — in your own words, and confirm it was picked up:
 
 ```sh
 stupid-comments policy
@@ -66,11 +78,11 @@ Without that section and without a config file, the plugin stays completely sile
 
 Your policy is read from the `# Comments Policy` section of your agent memory (any heading level, case-insensitive). That text is quoted verbatim in every rejection, never paraphrased. If no such section and no config file exist, the plugin does nothing at all and says nothing at all.
 
-**Memory is searched in a fixed order,** and the first file carrying the section wins: `$CLAUDE_CONFIG_DIR/CLAUDE.md` (default `~/.claude/CLAUDE.md`), then `$DSH_HOME/AGENTS.md` (default `~/.dsh/AGENTS.md`), then `$AGENTS_HOME/AGENTS.md` (default `~/.agents/AGENTS.md`), then the nearest `CLAUDE.md` and `AGENTS.md` at or above the file being checked. The order is fixed rather than harness-derived on purpose: a machine running both must not get a different policy depending on which agent asked.
+**Memory is searched in a fixed order,** and the first file carrying the section wins: `$CLAUDE_CONFIG_DIR/CLAUDE.md` (default `~/.claude/CLAUDE.md`), then `$DSH_HOME/AGENTS.md` (default `~/.dsh/AGENTS.md`), then Pi's agent dir (`$PI_CODING_AGENT_DIR`, default `~/.pi/agent`), then omp's (`$PI_CODING_AGENT_DIR`, default `~/.omp/agent`), then `$AGENTS_HOME/AGENTS.md` (default `~/.agents/AGENTS.md`), then the nearest `CLAUDE.md` and `AGENTS.md` at or above the starting directory — the session's working directory for the plugins, the first path given to `check`. In Pi's agent dir the file read is the one Pi itself loads: the first of `AGENTS.override.md`, `AGENTS.md`, and `CLAUDE.md` that exists. The order is fixed rather than harness-derived on purpose: a machine running more than one must not get a different policy depending on which agent asked.
 
 **Enforcement is layered.** The pre-write gate catches Write/Edit/MultiEdit early, reconstructing the post-edit file in memory so rules see whole-file context while reporting only the lines the edit introduced. The stop gate is the real guarantee: it diffs the working tree and analyzes added lines only, which makes it indifferent to *how* the file was written — heredoc, `sed`, or a subagent all land in the same net.
 
-**Both harnesses run the same engine.** Claude Code wires those gates through `PreToolUse`, `Stop`, and `SubagentStop`; DSH wires them through `tools/pre-execute`, `agent/turn-stopping`, and `subagent/end`. Each adapter builds the identical JSON payload and hands it to the same binary, so a rule only ever exists in one place.
+**Every harness runs the same engine.** Claude Code wires those gates through `PreToolUse`, `Stop`, and `SubagentStop`; DSH wires them through `tools/pre-execute`, `agent/turn-stopping`, and `subagent/end`; Pi wires them through `tool_call` and `agent_before_settle`; oh-my-pi runs the same extension, through `tool_call` and `session_stop`. Each adapter builds the identical JSON payload and hands it to the same binary, so a rule only ever exists in one place.
 
 **Nothing is judged until it is classified.** Every comment is sorted into `directive`, `license-header`, `doc-comment`, or `prose`, and only `prose` faces the ratio and redundancy rules. Lint pragmas, `go:build` lines, shebangs, SPDX headers, and JSDoc are structurally exempt rather than merely tolerated — and a pragma placed above a comment block never launders the block beneath it.
 
@@ -130,7 +142,27 @@ The package declares a `dsh.bundle` patch, so `dsh plugin add` installs it and r
 
 It targets DeepSeek Harness 0.2.x. The range is declared through optional `@deepseek-ai/dsh-*` peer dependencies, which is the check dsh itself enforces: a dsh outside that range refuses the install until you grant `dsh plugin allow-version`. The 0.2 line matters because its session format refuses messages attributed to the retired `plugin` source kind, which is what releases up to 0.2.1 sent.
 
-Restart the session so the hooks register. If a policy exists but the CLI is missing, the plugin says so once and enforces nothing.
+**Pi:**
+
+```sh
+pi install git:github.com/nmindz/stupid-comments
+pi install npm:stupid-comments                  # from the registry, once a release carries Pi support
+pi install /path/to/clone                       # from a checkout
+```
+
+The package declares its extension under the `pi` key of `package.json`, which is what `pi install` reads. It needs Pi 0.87 or later, the first release with the `agent_before_settle` boundary the stop gate runs on, and it has been run end to end against 0.87.1, in the interactive TUI as well as print, JSON, and RPC modes. It imports nothing from Pi, so it carries no Pi dependency of its own.
+
+**oh-my-pi (`omp` and omp-web):**
+
+```sh
+omp plugin install github:nmindz/stupid-comments
+omp plugin install stupid-comments              # from the registry, once a release carries Pi support
+omp plugin link /path/to/clone                  # from a checkout
+```
+
+oh-my-pi reads the same `pi` manifest key and loads the same extension, which switches to omp's `session_stop` seam on its own. omp-web discovers extensions with omp's own loader and keeps user-level plugins for every project, trusted or not, so one install covers the `omp` TUI and the browser alike. Both have been run end to end against omp 18.1, the line omp-web 0.4 pins.
+
+Restart the session so the hooks register (`/reload` in Pi and omp). If a policy exists but the CLI is missing, the plugin says so once and enforces nothing.
 
 To upgrade later, every piece moves independently:
 
@@ -139,11 +171,13 @@ make install
 claude plugin marketplace update stupid-comments
 claude plugin update stupid-comments@stupid-comments
 dsh plugin --profile tui update stupid-comments
+pi update git:github.com/nmindz/stupid-comments
+omp plugin upgrade stupid-comments
 ```
 
 ### 3. A policy
 
-Add a `# Comments Policy` section to `~/.claude/CLAUDE.md` or `~/.dsh/AGENTS.md` describing, in your own words, how you want comments written. Confirm it was picked up with `stupid-comments policy`.
+Add a `# Comments Policy` section to `~/.claude/CLAUDE.md`, `~/.dsh/AGENTS.md`, `~/.pi/agent/AGENTS.md`, or `~/.omp/agent/AGENTS.md` describing, in your own words, how you want comments written. Confirm it was picked up with `stupid-comments policy`.
 
 To keep the policy somewhere else, point at it with the `prose` config key.
 
@@ -187,9 +221,15 @@ Set up the stupid-comments comment policy enforcer on this machine.
      /plugin install stupid-comments@stupid-comments
    In DeepSeek Harness, run it yourself and name the profile you targeted:
      dsh plugin --profile <profile> add github:nmindz/stupid-comments
+   In Pi, run it yourself, then tell me to /reload:
+     pi install git:github.com/nmindz/stupid-comments
+   In oh-my-pi (omp or omp-web), run it yourself, then tell me to /reload:
+     omp plugin install github:nmindz/stupid-comments
 
-5. Read my agent memory — ~/.claude/CLAUDE.md, or ~/.dsh/AGENTS.md under
-   DeepSeek Harness — and look for a heading matching "Comments Policy" at
+5. Read my agent memory — ~/.claude/CLAUDE.md, ~/.dsh/AGENTS.md under
+   DeepSeek Harness, ~/.pi/agent/AGENTS.md under Pi, or
+   ~/.omp/agent/AGENTS.md under oh-my-pi — and look for a
+   heading matching "Comments Policy" at
    any level, case-insensitive. If it is missing, DO NOT invent a policy.
    Show me where the section goes, ask what my rules are, and write exactly
    what I tell you.
@@ -206,7 +246,7 @@ Set up the stupid-comments comment policy enforcer on this machine.
 
 ## Configuration
 
-Everything here is optional. Drop a `.stupid-comments.jsonc` anywhere at or above the file being checked; the nearest one upward wins.
+Everything here is optional. Drop a `.stupid-comments.jsonc` anywhere at or above the starting directory — the session's working directory for the plugins, the first path given to `check` — and the nearest one upward wins.
 
 ```jsonc
 {
@@ -264,7 +304,7 @@ stupid-comments check [PATH]...     # report findings, change nothing
 stupid-comments check --json        # machine-readable, for CI
 stupid-comments check --adjudicate  # permit deletion as a remedy
 stupid-comments policy              # show the resolved policy and its source
-stupid-comments hook claude|dsh     # consume a hook payload on stdin
+stupid-comments hook claude|dsh|pi  # consume a hook payload on stdin
 ```
 
 Every run prints a coverage summary to **stderr**, leaving stdout clean for `--json`:
@@ -285,28 +325,28 @@ A file with no grammar is not a passing file, so it is never folded into the che
 
 ## Slash commands
 
-| Claude Code | DeepSeek Harness | Purpose |
+| Claude Code, Pi, omp | DeepSeek Harness | Purpose |
 | --- | --- | --- |
 | `/stupid-comments:policy` | `/stupid-comments-policy` | Show the policy in force and where it came from |
 | `/stupid-comments:check [path]` | `/stupid-comments-check [path]` | Report findings, change nothing |
 | `/stupid-comments:fix [path]` | `/stupid-comments-fix [path]` | Adjudicated sweep of an existing codebase; deletion permitted |
 | `/stupid-comments:off` | `/stupid-comments-off` | How to disarm for a session |
 
-The names differ only because DSH command names cannot carry a colon. The prompts do not: both harnesses read the same markdown files under `plugins/stupid-comments/commands/`, so the wording has exactly one home.
+The names differ only because DSH command names cannot carry a colon. The prompts do not: every harness reads the same markdown files under `plugins/stupid-comments/commands/`, so the wording has exactly one home.
 
 ## Semantic judging
 
 Deterministic rules cannot decide whether a comment earns its place. Setting `"semantic": "warn"` (or `"block"`) sends the prose comments and your policy text to `claude -p`, using the session authentication you already have — there is no API key to configure and none is wanted. Every failure is silent: no `claude` on PATH, a timeout, unparseable output, all mean no findings.
 
-The judge is a subprocess, not a harness binding. Point `semanticCommand` at anything that reads a prompt on stdin and answers with JSON, and it works the same from either plugin.
+The judge is a subprocess, not a harness binding. Point `semanticCommand` at anything that reads a prompt on stdin and answers with JSON, and it works the same from every plugin.
 
 It is off by default because it spends a model call per checked file. It is also the only rule that catches `// Adds a and b` sitting above `const sum = a + b`, which is probably the comment that made you look for this tool.
 
 ## Escaping it
 
-Set `STUPID_COMMENTS=0` in the session environment. That is deliberately the only mid-session hatch — it lives somewhere the model cannot write, so the enforced party cannot disable its own gate. Both plugins honor it, and the DSH one registers no seams at all when it is set.
+Set `STUPID_COMMENTS=0` in the session environment. That is deliberately the only mid-session hatch — it lives somewhere the model cannot write, so the enforced party cannot disable its own gate. Every plugin honors it, and the DSH, Pi, and omp ones register nothing at all when it is set.
 
-Permanently: change `mode` in `.stupid-comments.jsonc`, or remove the plugin with `/plugin uninstall stupid-comments@stupid-comments` or `dsh plugin --profile tui remove stupid-comments`.
+Permanently: change `mode` in `.stupid-comments.jsonc`, or remove the plugin with `/plugin uninstall stupid-comments@stupid-comments`, `dsh plugin --profile tui remove stupid-comments`, `pi remove` with the source you installed from, or `omp plugin uninstall stupid-comments`.
 
 Suppression pragmas exist, but they are anchored to git:
 
@@ -345,14 +385,17 @@ Requires a Rust toolchain. `make help` lists every target.
 | `make build` | `cargo build --release` | Compile the release binary |
 | `make test` | `cargo test` | Run the test suite |
 | `make dsh-test` | `node plugins/stupid-comments/dsh/test.mjs` | Drive the DSH adapter against the release binary |
+| `make pi-test` | `node plugins/stupid-comments/pi/test.mjs` | Drive the Pi extension against the release binary |
 | `make lint` | `cargo clippy --all-targets` | Lint every target |
 | `make version` | `node scripts/sync-version.mjs X.Y.Z` | Write one version into all five manifests |
-| `make validate` | `claude plugin validate` + `scripts/validate-dsh-manifest.mjs` | Check both plugin manifests |
+| `make validate` | `claude plugin validate` + `scripts/validate-{dsh,pi}-manifest.mjs` | Check every plugin manifest |
 | `make check` | all of the above | Everything CI would run |
 | `make install` | `cargo install --path crates/stupid-comments --root ~/.local --force` | Install the binary |
 | `make uninstall` | `cargo uninstall --root ~/.local stupid-comments` | Remove it |
 | `make dsh-install` | `dsh plugin --profile tui add $(pwd)` | Register this checkout with a dsh profile |
 | `make dsh-uninstall` | `dsh plugin --profile tui remove stupid-comments` | Unregister it |
+| `make pi-install` | `pi install $(pwd)` | Register this checkout as a Pi package |
+| `make pi-uninstall` | `pi remove $(pwd)` | Unregister it |
 | `make selfcheck` | `./target/release/stupid-comments check .` | Enforce this repo's policy on itself |
 | `make clean` | `cargo clean` | Remove build artifacts |
 
@@ -371,20 +414,26 @@ crates/stupid-comments/src/
 └── main.rs        # CLI
 ```
 
-The harness plugins are adapters over that binary, and neither carries a rule of its own:
+The harness plugins are adapters over that binary, and none carries a rule of its own:
 
 ```
 plugins/stupid-comments/
 ├── .claude-plugin/plugin.json   # Claude Code manifest
 ├── hooks/hooks.json             # Claude Code hook wiring
-├── commands/*.md                # slash command prompts, read by both harnesses
-└── dsh/
-    ├── index.js                 # DSH cordis plugin: seams, payloads, commands
-    ├── cordis.patch.yml         # the bundle layer dsh composes
-    └── test.mjs                 # drives the adapter against the real binary
+├── commands/*.md                # slash command prompts, read by every harness
+├── lib/
+│   ├── engine.js                # spawn, handshake, exit code -> verdict
+│   └── commands.js              # command markdown loader and expander
+├── dsh/
+│   ├── index.js                 # DSH cordis plugin: seams, payloads, commands
+│   ├── cordis.patch.yml         # the bundle layer dsh composes
+│   └── test.mjs                 # drives the adapter against the real binary
+└── pi/
+    ├── index.js                 # Pi and omp extension: events, payloads, commands
+    └── test.mjs                 # drives the extension against the real binary
 ```
 
-`package.json` at the repo root is the DSH bundle manifest: it points `dsh.bundle.patch` at that patch file, which is the whole reason `dsh plugin add` can install this repository directly.
+`package.json` at the repo root is both the DSH bundle manifest and the Pi package manifest: `dsh.bundle.patch` points at that patch file, which is the whole reason `dsh plugin add` can install this repository directly, and `pi.extensions` names the extension `pi install` loads.
 
 Releases are derived from Conventional Commits by semantic-release, and the npm package is *staged* rather than published: CI authenticates through OIDC trusted publishing and holds no credential that can ship a version on its own, so a human approves the tarball with a 2FA code. See [CONTRIBUTING.md](CONTRIBUTING.md) for the commit convention, the release flow, and a walkthrough of adding a language.
 
@@ -397,10 +446,16 @@ Releases are derived from Conventional Commits by semantic-release, and the npm 
 - `minProseCommentsForRatio` counts comment *blocks*, not lines, so a file carrying fewer than four separate blocks never trips the ratio rule however much of the file they cover. Long blocks are caught by the length rule instead.
 - Semantic judging costs a model call per checked file, so it is off by default.
 - The `Stop` gate diffs against `HEAD`, so a tree that was already dirty before the session has those earlier changes considered too.
+- Policy is resolved from the session's working directory, not from the file being written, so a write outside the workspace answers to the workspace's policy.
 - DSH also ships a text-editor tool. Its `create` and `str_replace` commands are translated and checked before the write; its `insert` command carries no anchor to reconstruct from, so it falls to the stop gate.
-- The stop gate forces at most one continuation per turn. The stop that follows a forced continuation reports `stop_hook_active`, so a violation the model cannot fix ends the turn instead of looping it; Claude Code sets that flag itself, and the DSH adapter tracks it per turn.
+- The stop gate forces at most one continuation per turn. The stop that follows a forced continuation reports `stop_hook_active`, so a violation the model cannot fix ends the turn instead of looping it; Claude Code sets that flag itself, the DSH adapter tracks it per turn, the Pi extension tracks it per prompt, clearing it on `agent_settled`, and omp reports it itself.
 - Under DSH, `subagent/end` is an observation point rather than a decision point. A subagent that ends on a violation is handed the finding as context; only the parent's own stop gate can force the rewrite.
-- The DSH plugin reports a missing binary the first time a write is about to be checked, not at session start, so a session that never writes code stays silent about it.
+- Pi has no built-in subagents, so it has no `SubagentStop` counterpart. omp skips `session_stop` for its subagents, so their writes answer to the pre-write gate and to the parent's stop gate.
+- Pi's `edit` strips a BOM, normalizes CRLF, and falls back to fuzzy matching (trailing whitespace, typographic quotes) before it gives up on an anchor. The engine matches anchors literally, so wherever Pi needed one of those, the pre-write gate stands down and the stop gate catches the result.
+- omp's default `hashline` edits, and its `patch`, `apply_patch`, and `sloppy` modes, carry no anchors the engine can rebuild a file from, so those edits land unchecked and the stop gate catches what they wrote. Writes are always checked first. Set `edit.mode: replace` in omp's `config.yml` to have edits checked before they land too.
+- omp shows its stop-gate continuation as a hidden extension message, so the plugin adds a one-line warning when it sends the model back. omp-web renders that hidden message itself, as a collapsible panel.
+- Pi's one-shot `-p` and `--mode json` runs shut down once the typed prompt resolves. A slash command starts the prompt it sends without that prompt being awaited, so `/stupid-comments:*` never reaches the model there. The interactive TUI and RPC mode run it normally.
+- The DSH, Pi, and omp plugins report a missing binary the first time a write is about to be checked, not at session start, so a session that never writes code stays silent about it.
 
 ## Contributing
 

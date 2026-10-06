@@ -16,12 +16,12 @@ Thanks for considering a contribution. This document covers the setup, the commi
 
 ## Getting started
 
-You need a Rust toolchain, from <https://rustup.rs>. Node 22.13+ and pnpm are needed only to touch the DSH plugin or the release tooling.
+You need a Rust toolchain, from <https://rustup.rs>. Node 22.13+ and pnpm are needed only to touch the DSH or Pi plugin or the release tooling. Use `make` or `node` directly for the plugin checks: `pnpm run` re-resolves dependencies and can rewrite `pnpm-lock.yaml`.
 
 ```sh
 git clone https://github.com/nmindz/stupid-comments && cd stupid-comments
 pnpm install        # dev tooling only; the plugin itself has no dependencies
-make check          # tests + lint + both plugin manifests
+make check          # tests + lint + every plugin manifest
 ```
 
 Every target has a bare cargo equivalent if you would rather not use make:
@@ -31,14 +31,17 @@ Every target has a bare cargo equivalent if you would rather not use make:
 | `make build` | `cargo build --release` |
 | `make test` | `cargo test` |
 | `make dsh-test` | `node plugins/stupid-comments/dsh/test.mjs` |
+| `make pi-test` | `node plugins/stupid-comments/pi/test.mjs` |
 | `make lint` | `cargo clippy --all-targets` |
 | `make version VERSION=X.Y.Z` | `node scripts/sync-version.mjs X.Y.Z` |
-| `make validate` | `claude plugin validate plugins/stupid-comments` + `node scripts/validate-dsh-manifest.mjs` |
-| `make check` | the four above, in order |
+| `make validate` | `claude plugin validate plugins/stupid-comments` + `node scripts/validate-dsh-manifest.mjs` + `node scripts/validate-pi-manifest.mjs` |
+| `make check` | the five above, in order |
 | `make install` | `cargo install --path crates/stupid-comments --root ~/.local --force` |
 | `make uninstall` | `cargo uninstall --root ~/.local stupid-comments` |
 | `make dsh-install` | `dsh plugin --profile tui add $(pwd)` |
 | `make dsh-uninstall` | `dsh plugin --profile tui remove stupid-comments` |
+| `make pi-install` | `pi install $(pwd)` |
+| `make pi-uninstall` | `pi remove $(pwd)` |
 | `make selfcheck` | `./target/release/stupid-comments check .` |
 | `make clean` | `cargo clean` |
 
@@ -66,16 +69,18 @@ crates/stupid-comments/
 plugins/stupid-comments/
 ├── .claude-plugin/    # Claude Code manifest
 ├── hooks/             # Claude Code hook wiring
-├── commands/          # slash command prompts, read by both harnesses
-└── dsh/               # the DSH plugin: seams, payloads, commands, its own test
-package.json           # the DSH bundle manifest (dsh.bundle.patch)
+├── commands/          # slash command prompts, read by every harness
+├── lib/               # transport and command loading shared by the DSH and Pi plugins
+├── dsh/               # the DSH plugin: seams, payloads, commands, its own test
+└── pi/                # the Pi and omp extension: events, payloads, commands, its own test
+package.json           # the DSH bundle manifest (dsh.bundle.patch) and Pi package manifest (pi.extensions)
 scripts/               # version sync and the manifest checks no compiler can do
 .github/workflows/     # CI, and the release that stages the npm package
 ```
 
-### Two harnesses, one engine
+### Every harness, one engine
 
-Rules live in the Rust crate and nowhere else. A harness plugin may only translate: build the hook payload, hand it to the binary, map the exit code back. A behavior change that has to be written twice — once per harness — belongs in the crate instead.
+Rules live in the Rust crate and nowhere else. Pi and its oh-my-pi fork share one extension, which picks up whichever stop seam its host fires. A harness plugin may only translate: build the hook payload, hand it to the binary, map the exit code back. A behavior change that has to be written once per harness belongs in the crate instead, and transport the JS plugins share belongs in `plugins/stupid-comments/lib/`.
 
 ## The self-enforcement rule
 
@@ -114,7 +119,7 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/).
 | `build` | Build system, Makefile, dependencies |
 | `chore` | Releases and housekeeping |
 
-**Scopes in use:** `lang`, `rules`, `comments`, `policy`, `cli`, `hook`, `vcs`, `plugin`, `dsh`, `release`. Omit the scope when a change genuinely spans the codebase.
+**Scopes in use:** `lang`, `rules`, `comments`, `policy`, `cli`, `hook`, `vcs`, `plugin`, `dsh`, `pi`, `release`. Omit the scope when a change genuinely spans the codebase.
 
 The convention is enforced: CI runs `commitlint` over every commit in a pull request, and the release version is derived from these messages. A `feat` is a minor bump, `fix`/`perf`/`refactor` a patch, a `BREAKING CHANGE:` footer a major; `chore`, `ci`, `style`, `test` and `build` release nothing.
 
@@ -143,7 +148,7 @@ Small, focused pull requests get reviewed faster. If you are planning something 
 
 ## Testing
 
-Everything lives in `crates/stupid-comments/tests/corpus.rs`, driven by fixtures.
+The engine's suite lives in `crates/stupid-comments/tests/corpus.rs`, driven by fixtures. Each JS plugin has its own `test.mjs` beside it, which drives the plugin through a fake harness context against the real release binary, so `make build` comes first.
 
 Fixtures come in two kinds, and the naming is load-bearing:
 

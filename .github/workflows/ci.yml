@@ -32,7 +32,7 @@ jobs:
       - name: Enforce this repo's comment policy on itself
         run: ./target/release/stupid-comments check .
 
-      # The DSH adapter tests drive this exact binary, and so does anyone
+      # The adapter tests drive this exact binary, and so does anyone
       # reproducing a failure locally.
       - uses: actions/upload-artifact@v4
         with:
@@ -42,7 +42,7 @@ jobs:
           if-no-files-found: error
 
   plugin:
-    name: DSH adapter on Node ${{ matrix.node }}
+    name: DSH and Pi adapters on Node ${{ matrix.node }}
     needs: rust
     runs-on: ubuntu-latest
     strategy:
@@ -96,9 +96,9 @@ jobs:
 
       - run: pnpm pack
 
-      # The DSH plugin reads its command prompts from disk at runtime, and they
-      # live outside the module. A bad `files` list would otherwise surface only
-      # once someone installed the package.
+      # The DSH and Pi adapters read their command prompts and shared
+      # transport from disk at runtime, outside either module. A bad `files`
+      # list would otherwise surface only once someone installed the package.
       - name: Verify tarball contents
         run: |
           tar tzf stupid-comments-*.tgz | sort > /tmp/contents.txt
@@ -106,6 +106,9 @@ jobs:
           for required in \
             package/plugins/stupid-comments/dsh/index.js \
             package/plugins/stupid-comments/dsh/cordis.patch.yml \
+            package/plugins/stupid-comments/pi/index.js \
+            package/plugins/stupid-comments/lib/engine.js \
+            package/plugins/stupid-comments/lib/commands.js \
             package/plugins/stupid-comments/commands/check.md \
             package/plugins/stupid-comments/commands/fix.md \
             package/plugins/stupid-comments/commands/off.md \
@@ -118,8 +121,10 @@ jobs:
           do
             grep -qx "$required" /tmp/contents.txt || { echo "missing from tarball: $required"; exit 1; }
           done
-          ! grep -qx package/plugins/stupid-comments/dsh/test.mjs /tmp/contents.txt \
-            || { echo "the adapter test suite must not ship"; exit 1; }
+          for suite in dsh pi; do
+            ! grep -qx "package/plugins/stupid-comments/$suite/test.mjs" /tmp/contents.txt \
+              || { echo "the $suite adapter test suite must not ship"; exit 1; }
+          done
 
   commits:
     name: Lint commit messages

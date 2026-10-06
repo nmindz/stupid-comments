@@ -1,7 +1,7 @@
 {
   "name": "stupid-comments",
   "version": "0.2.2",
-  "description": "Enforces your comment policy at write time, inside DeepSeek Harness. Reads the policy from your AGENTS.md or CLAUDE.md, blocks violating writes, and re-injects the policy verbatim so the model stops drifting from it.",
+  "description": "Enforces your comment policy at write time, inside DeepSeek Harness, Pi, and oh-my-pi. Reads the policy from your AGENTS.md or CLAUDE.md, blocks violating writes, and re-injects the policy verbatim so the model stops drifting from it.",
   "license": "GPL-3.0-or-later",
   "author": {
     "name": "nmindz",
@@ -16,13 +16,14 @@
   "files": [
     "plugins/stupid-comments/**",
     "!plugins/stupid-comments/dsh/test.mjs",
+    "!plugins/stupid-comments/pi/test.mjs",
     ".claude-plugin/**",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "test": "node plugins/stupid-comments/dsh/test.mjs",
-    "validate": "node --check plugins/stupid-comments/dsh/index.js && node scripts/validate-dsh-manifest.mjs",
+    "test": "node plugins/stupid-comments/dsh/test.mjs && node plugins/stupid-comments/pi/test.mjs",
+    "validate": "node --check plugins/stupid-comments/dsh/index.js && node --check plugins/stupid-comments/pi/index.js && node scripts/validate-dsh-manifest.mjs && node scripts/validate-pi-manifest.mjs",
     "version:sync": "node scripts/sync-version.mjs"
   },
   "engines": {
@@ -69,6 +70,10 @@
     "dsh",
     "dsh-plugin",
     "deepseek-harness",
+    "pi-package",
+    "pi-coding-agent",
+    "oh-my-pi",
+    "omp",
     "claude-code",
     "comments",
     "policy",
@@ -88,5 +93,8 @@
     "bundle": {
       "patch": "./plugins/stupid-comments/dsh/cordis.patch.yml"
     }
+  },
+  "pi": {
+    "extensions": ["./plugins/stupid-comments/pi/index.js"]
   }
 }
