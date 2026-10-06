@@ -1,20 +1,12 @@
 // DSH (DeepSeek Harness) adapter. The Rust binary holds every rule; this turns
 // harness seams into the hook payload it already speaks, and its exit code back
-// into a DSH decision, so both harnesses run identical logic.
-//
-// Every failure path is silent: a missing binary never blocks a write.
+// into a DSH decision, so every harness runs identical logic.
 
-import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { readdirSync, readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { expand, loadCommands } from '../lib/commands.js'
+import { createRunner, disarmed, PLUGIN } from '../lib/engine.js'
 
-export const name = 'stupid-comments'
-
-const DISARM_ENV = 'STUPID_COMMENTS'
-const DEFAULT_BINARY = 'stupid-comments'
-const DEFAULT_TIMEOUT_MS = 15_000
-const BLOCK_EXIT_CODE = 2
+export const name = PLUGIN
 
 // Session format v4 refuses the retired `{ kind: 'plugin' }` wrapper, so every
 // message carries a kind this plugin owns.
@@ -24,15 +16,18 @@ const FINDING_SOURCE = { kind: name, form: 'notice', summary: 'Comment policy vi
 /** Tools whose arguments carry file content the policy applies to. */
 const WATCHED_TOOLS = new Set(['write', 'edit', 'multiedit', 'multi_edit', 'str_replace_editor'])
 
-const COMMANDS_DIR = new URL('../commands/', import.meta.url)
 const COMMAND_PREFIX = 'stupid-comments-'
 
 export function apply(ctx, config = {}) {
-  if (process.env[DISARM_ENV] === '0') return
+  if (disarmed()) return
 
-  const binary = config.binary ?? DEFAULT_BINARY
-  const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const run = createRunner(ctx, binary, timeoutMs)
+  const runner = createRunner({
+    client: 'dsh',
+    binary: config.binary,
+    timeoutMs: config.timeoutMs,
+    warn: (message) => ctx.logger?.warn(message),
+  })
+  const run = (agent, payload, signal) => runner(payload, { cwd: workspaceOf(agent), signal })
 
   ctx.on('tools/pre-execute', async (exec, next) => {
     if (!WATCHED_TOOLS.has(exec.name.toLowerCase())) return next()
@@ -81,7 +76,7 @@ export function apply(ctx, config = {}) {
   })
 
   ctx.inject(['commands'], (commandCtx) => {
-    for (const command of loadCommands(ctx)) {
+    for (const command of loadCommands((message) => ctx.logger?.warn(message))) {
       commandCtx.commands.register({
         name: COMMAND_PREFIX + command.slug,
         description: command.description,
@@ -95,95 +90,8 @@ export function apply(ctx, config = {}) {
   })
 }
 
-const INSTALL_HINT = 'cargo install --root ~/.local --git https://github.com/nmindz/stupid-comments stupid-comments'
-
-/**
- * One spawn of `stupid-comments hook dsh` with the payload on stdin. The first
- * unusable binary disables the runner for the rest of the process: a user whose
- * binary is missing or too old gets one warning, not one per tool call.
- */
-function createRunner(ctx, binary, timeoutMs) {
-  const quiet = { block: false, message: '' }
-  let unusable = false
-  let handshake
-
-  return async function run(agent, payload, signal) {
-    if (unusable || process.env[DISARM_ENV] === '0') return quiet
-    handshake ??= probe(binary, timeoutMs)
-    if (!await handshake) {
-      unusable = true
-      return quiet
-    }
-    const cwd = workspaceOf(agent)
-
-    try {
-      const result = await execute(binary, payload, { cwd, timeoutMs, signal })
-      const message = result.stderr.trim()
-      if (!message) return quiet
-      return { block: result.code === BLOCK_EXIT_CODE, message }
-    } catch {
-      return quiet
-    }
-  }
-
-  /**
-   * Ask the binary to answer an empty payload before trusting its exit codes.
-   * A binary older than the DSH client rejects the argument through its
-   * argument parser, which exits 2 — the same code that means "block this
-   * write". Without this handshake a stale install denies every write with a
-   * usage error as the reason.
-   */
-  async function probe(binary, timeoutMs) {
-    try {
-      const result = await execute(binary, {}, { timeoutMs })
-      if (result.code === 0) return true
-      ctx.logger?.warn(
-        `${name}: "${binary}" does not understand this plugin (\`hook dsh\` exited ${result.code}), `
-        + `so nothing is being enforced. Update it with: ${INSTALL_HINT}`,
-      )
-    } catch (error) {
-      const reason = error?.code === 'ENOENT' ? 'is not on PATH' : `could not be run (${String(error)})`
-      ctx.logger?.warn(`${name}: "${binary}" ${reason}, so nothing is being enforced. Install it with: ${INSTALL_HINT}`)
-    }
-    return false
-  }
-}
-
-function execute(binary, payload, { cwd, timeoutMs, signal }) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(binary, ['hook', 'dsh'], {
-      ...cwd ? { cwd } : {},
-      stdio: ['pipe', 'ignore', 'pipe'],
-    })
-
-    let stderr = ''
-    let settled = false
-    const finish = (fn, value) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', abort)
-      fn(value)
-    }
-    const abort = () => {
-      child.kill('SIGKILL')
-      finish(resolve, { code: 0, stderr: '' })
-    }
-    const timer = setTimeout(abort, timeoutMs)
-
-    child.stderr.setEncoding('utf8')
-    child.stderr.on('data', (chunk) => { stderr += chunk })
-    child.on('error', (error) => { finish(reject, error) })
-    child.on('close', (code) => { finish(resolve, { code: code ?? 0, stderr }) })
-    signal?.addEventListener('abort', abort, { once: true })
-
-    child.stdin.on('error', () => {})
-    child.stdin.end(JSON.stringify(payload))
-  })
-}
-
 // --- Payloads. Field names are the Claude Code hook input schema, because the
-// binary parses one dialect and both harnesses feed it. ---
+// binary parses one dialect and every harness feeds it. ---
 
 function base(agent, event) {
   return {
@@ -266,70 +174,4 @@ function inject(agent, text, source) {
   try {
     agent?.inject(userMessage(text, source))
   } catch {}
-}
-
-// --- Commands. The prompt bodies are the same markdown files Claude Code
-// loads, so neither harness owns a private copy of the wording. ---
-
-function loadCommands(ctx) {
-  let entries
-  try {
-    entries = readdirSync(fileURLToPath(COMMANDS_DIR))
-  } catch (error) {
-    ctx.logger?.warn(`${name}: could not read command definitions: ${String(error)}`)
-    return []
-  }
-
-  const commands = []
-  for (const entry of entries) {
-    if (!entry.endsWith('.md')) continue
-    const parsed = parseCommandFile(new URL(entry, COMMANDS_DIR))
-    if (parsed) commands.push({ slug: entry.slice(0, -3), ...parsed })
-  }
-  return commands
-}
-
-function parseCommandFile(url) {
-  let raw
-  try {
-    raw = readFileSync(fileURLToPath(url), 'utf8')
-  } catch {
-    return undefined
-  }
-
-  const { frontmatter, body } = splitFrontmatter(raw)
-  const description = frontmatter.description ?? 'Comment policy command.'
-  if (!body.trim()) return undefined
-  return {
-    description,
-    ...frontmatter['argument-hint'] ? { hint: frontmatter['argument-hint'] } : {},
-    body: body.trim(),
-  }
-}
-
-function splitFrontmatter(raw) {
-  const text = raw.replace(/^\uFEFF/, '')
-  if (!text.startsWith('---')) return { frontmatter: {}, body: text }
-  const end = text.indexOf('\n---', 3)
-  if (end === -1) return { frontmatter: {}, body: text }
-
-  const frontmatter = {}
-  for (const line of text.slice(3, end).split('\n')) {
-    const at = line.indexOf(':')
-    if (at === -1) continue
-    frontmatter[line.slice(0, at).trim()] = line.slice(at + 1).trim()
-  }
-  const bodyStart = text.indexOf('\n', end + 1)
-  return { frontmatter, body: bodyStart === -1 ? '' : text.slice(bodyStart + 1) }
-}
-
-/** The `$1`, `${1:-default}`, and `$ARGUMENTS` placeholders Claude Code expands. */
-function expand(body, rawInput) {
-  const input = rawInput.trim()
-  const args = input ? input.split(/\s+/) : []
-  return body
-    .replace(/\$\{(\d+):-([^}]*)\}/g, (_, index, fallback) => args[Number(index) - 1] ?? fallback)
-    .replace(/\$\{(\d+)\}/g, (_, index) => args[Number(index) - 1] ?? '')
-    .replace(/\$ARGUMENTS\b/g, input)
-    .replace(/\$(\d+)/g, (_, index) => args[Number(index) - 1] ?? '')
 }
