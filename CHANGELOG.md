@@ -2,6 +2,22 @@
 
 Every release is generated from Conventional Commits by semantic-release.
 
+## [0.3.0](https://github.com/nmindz/stupid-comments/compare/v0.2.2...v0.3.0) (2026-10-06)
+
+### Features
+
+* **pi:** enforce the comment policy in Pi and oh-my-pi ([6c79971](https://github.com/nmindz/stupid-comments/commit/6c79971fb43de89d89f3ebdc07dabb0de3ffe68d))
+* **policy:** read the Pi and oh-my-pi agent memory ([5e69fd6](https://github.com/nmindz/stupid-comments/commit/5e69fd6308499e8eb1c76c4467361186aa57daad))
+
+### Bug Fixes
+
+* **hook:** keep multi-edit ranges on the lines each edit wrote ([078435b](https://github.com/nmindz/stupid-comments/commit/078435b99ab92dbf048571f0ecd431bb6a48e1c0))
+* **hook:** set no comment baseline from a blocked write ([f863116](https://github.com/nmindz/stupid-comments/commit/f863116b005cd7ef0838023b2b7c512c032fe4a8))
+
+### Refactoring
+
+* **dsh:** move the binary transport into a shared module ([d8abb00](https://github.com/nmindz/stupid-comments/commit/d8abb007f8c81c9643adc0c7a120004f13cc0e19))
+
 ## [0.2.2](https://github.com/nmindz/stupid-comments/compare/v0.2.1...v0.2.2) (2026-09-30)
 
 ### Bug Fixes
