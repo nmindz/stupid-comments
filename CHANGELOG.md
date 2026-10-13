@@ -2,6 +2,13 @@
 
 Every release is generated from Conventional Commits by semantic-release.
 
+## [0.4.0](https://github.com/nmindz/stupid-comments/compare/v0.3.0...v0.4.0) (2026-10-13)
+
+### Features
+
+* **judge:** ask System One models first, then any harness CLI ([503bdaf](https://github.com/nmindz/stupid-comments/commit/503bdafa8afafa582d4f1aa21cb489a175bbafe6))
+* **pi:** gate hashline and patch edits after they land ([e56a131](https://github.com/nmindz/stupid-comments/commit/e56a131affe16ce6aab735d0cd902896ed88084b))
+
 ## [0.3.0](https://github.com/nmindz/stupid-comments/compare/v0.2.2...v0.3.0) (2026-10-06)
 
 ### Features
