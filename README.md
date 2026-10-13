@@ -240,13 +240,19 @@ Set up the stupid-comments comment policy enforcer on this machine.
    and that I should stay there until the reports look right before adding a
    .stupid-comments.jsonc with "mode": "block".
 
-8. Do not enable the `semantic` option. Tell me it exists, that it spends a
-   `claude -p` call per checked file, and that turning it on is my call.
+8. Do not enable the `semantic` option. Tell me it exists, that it asks a System
+   One endpoint (or, failing that, a harness CLI) about each new prose comment,
+   and that turning it on is my call.
 ```
 
 ## Configuration
 
-Everything here is optional. Drop a `.stupid-comments.jsonc` anywhere at or above the starting directory — the session's working directory for the plugins, the first path given to `check` — and the nearest one upward wins.
+Everything here is optional. Configuration comes in two layers, merged key by key with the project winning:
+
+- **User config**, the global baseline for every repository: `$STUPID_COMMENTS_CONFIG`, else `$XDG_CONFIG_HOME/stupid-comments/config.jsonc`, else `~/.config/stupid-comments/config.jsonc`.
+- **Project config**: a `.stupid-comments.jsonc` at or above the starting directory (the session's working directory for the plugins, the first path given to `check`). The nearest one upward wins.
+
+Put `"mode": "block"` and your `bannedPatterns` in the user config, and every repo on the machine enforces them without a file of its own.
 
 ```jsonc
 {
@@ -265,15 +271,15 @@ Everything here is optional. Drop a `.stupid-comments.jsonc` anywhere at or abov
 | Key | Type | Default | Purpose |
 | --- | --- | --- | --- |
 | `mode` | `shadow` \| `warn` \| `block` | `shadow` | Global severity ceiling. `shadow` reports without blocking |
-| `prose` | path | — | Read the policy from this file instead of agent memory. `~` expands |
+| `prose` | path | — | Read the policy from this file instead of agent memory. `~` expands; when the file has a `# Comments Policy` section, only that section is quoted |
 | `maxProseCommentLines` | integer | `5` | Longest permitted prose comment block |
 | `maxDocCommentLines` | integer | `40` | Longest permitted doc comment |
 | `maxCommentRatio` | float | `0.35` | Share of a file that may be prose comments |
 | `minProseCommentsForRatio` | integer | `4` | Comment *blocks* required before the ratio rule applies |
 | `bannedPatterns` | regex list | empty | Text that may never appear in a comment |
 | `redundancy` | `shadow` \| `warn` \| `block` | `warn` | Comments that restate the line below them |
-| `semantic` | `shadow` \| `warn` \| `block` | `shadow` | LLM taste judgement. See [Semantic judging](#semantic-judging) |
-| `semanticCommand` | string list | `["claude", "-p"]` | Command the semantic judge shells out to |
+| `semantic` | `shadow` \| `warn` \| `block` | `shadow` | Judged findings. See [Semantic judging](#semantic-judging) |
+| `judge` | object | see below | Which judge answers, and what it is asked |
 | `exclude` | glob list | empty | Paths to skip entirely |
 
 These are *calibration*, not policy. The defaults are deliberately loose, because a threshold tight enough to be opinionated would be smuggling in someone else's taste.
@@ -336,11 +342,70 @@ The names differ only because DSH command names cannot carry a colon. The prompt
 
 ## Semantic judging
 
-Deterministic rules cannot decide whether a comment earns its place. Setting `"semantic": "warn"` (or `"block"`) sends the prose comments and your policy text to `claude -p`, using the session authentication you already have — there is no API key to configure and none is wanted. Every failure is silent: no `claude` on PATH, a timeout, unparseable output, all mean no findings.
+Deterministic rules cannot decide whether a comment earns its place. Setting `"semantic": "warn"` (or `"block"`) asks a judge about every prose comment the change introduced. Unchanged comments are never sent. Every failure is silent: an endpoint that does not answer, a missing harness, a timeout, or unparseable output all mean no findings, and the deterministic rules still land.
 
-The judge is a subprocess, not a harness binding. Point `semanticCommand` at anything that reads a prompt on stdin and answers with JSON, and it works the same from every plugin.
+```jsonc
+"judge": {
+  "backend": "auto",            // auto (default) | systemone | harness | command
+  "budgetMs": 8000,             // whole judging budget per hook call; keep it under the plugin's 15 s kill
+  "systemone": [{ "url": "http://127.0.0.1:8766", "model": "laya-en", "apiKeyEnv": "TYPESAFE_API_KEY" }],
+  "questions": [
+    { "id": "prd", "instructions": "Does this comment reference a PRD or requirement number?", "threshold": 0.85 },
+    { "id": "restates", "instructions": "Does this comment merely restate what the code next to it obviously does?", "threshold": 0.85 }
+  ],
+  "harness": "omp",             // pin one harness; otherwise the first of `harnesses` on PATH
+  "harnesses": ["omp", "dsh", "opencode", "claude", "codex", "pi", "cursor-agent", "gemini", "copilot"],
+  "model": "anthropic/claude-haiku-4-5",  // passed to the harness's model flag
+  "command": ["my-judge"]       // backend "command": prompt on stdin, JSON verdicts on stdout
+}
+```
 
-It is off by default because it spends a model call per checked file. It is also the only rule that catches `// Adds a and b` sitting above `const sum = a + b`, which is probably the comment that made you look for this tool.
+**System One first.** A typed-decision model ([TypeSafe](https://typesafe.ai) JEV, or a local [Laya](https://github.com/mizorewww/laya-mlx) server) answers `POST {url}/v1/systemone` in around 100 ms. That is the only kind of judge fast enough to block a write before the plugin's timeout. Each comment, with the three code lines below it, is sent once with every question, and each question fires when its `noul` probability reaches its `threshold`. Endpoints are tried in order, and one that fails is dropped for the rest of the call. `apiKeyEnv` names the variable that holds the bearer token. The token itself never goes in config.
+
+Ask atomic questions, one per clause of your policy. Zero-shot Laya answered "does this comment violate the policy?" with "no" for every comment, good and bad alike. Split into "references a requirement number?" and "restates the code?", it separated the two. Calibrate each threshold on comments you consider clean before you set `semantic` to `block`.
+
+**Harnesses as fallback.** Under `auto` with no questions or endpoints configured, or when no endpoint answers, the judge runs the first harness CLI found on `PATH` in `harnesses` order (default omp > dsh > opencode > claude > codex > pi > cursor-agent > gemini > copilot), one-shot and with tools off wherever the CLI allows it. A harness takes seconds rather than milliseconds, so expect it to fit the stop gate, not every write. The judge process runs with `STUPID_COMMENTS=0`, so a harness that loads this plugin never judges its own judging. `stupid-comments policy` prints which harness and endpoints were resolved.
+
+### Setting up a judge
+
+Pick one System One backend. Either works alone, and you can list both, local first, so JEV only answers when Laya is down.
+
+**Laya, local and free (macOS on Apple silicon).** [Laya](https://github.com/mizorewww/laya-mlx) runs typed decisions on the GPU in milliseconds. `scripts/laya-judge.py` serves it on the System One wire. It needs [uv](https://docs.astral.sh/uv/), which installs `laya-mlx` from the script's inline metadata on first run.
+
+```sh
+uv run scripts/laya-judge.py          # first start downloads the aac6fef/laya-mlx checkpoint
+curl -s http://127.0.0.1:8766/health  # {"status": "ok", "model": "aac6fef/laya-mlx"}
+```
+
+It listens on `127.0.0.1` only, refuses any request that carries a browser `Origin`, and stays up until stopped. `LAYA_JUDGE_PORT` and `LAYA_JUDGE_MODEL` change the port and checkpoint. Keep it running under whatever supervisor you prefer (a LaunchAgent, `tmux`, a terminal tab); when it is down, the judge falls through to a harness or says nothing. Then point the config at it:
+
+```jsonc
+"semantic": "warn",
+"judge": {
+  "systemone": [{ "url": "http://127.0.0.1:8766", "model": "laya-en" }],
+  "questions": [/* as above */]
+}
+```
+
+**JEV, hosted (any OS).** [TypeSafe](https://typesafe.ai)'s JEV speaks the same wire and needs no local hardware, but every call is billed to your TypeSafe account. Export the key in the environment the harness starts from, then reference the variable rather than the key:
+
+```sh
+export TYPESAFE_API_KEY=…             # e.g. from a ~/.zshrc.d fragment or your secret manager
+```
+
+```jsonc
+"judge": {
+  "systemone": [
+    { "url": "http://127.0.0.1:8766", "model": "laya-en" },
+    { "url": "https://api.typesafe.ai", "model": "jev-latest", "apiKeyEnv": "TYPESAFE_API_KEY" }
+  ],
+  "questions": [/* as above */]
+}
+```
+
+An endpoint whose `apiKeyEnv` is unset or empty is skipped rather than called unauthenticated. Either way, confirm the wiring with `stupid-comments policy`, which lists the endpoints in the order they are tried, then write a comment that obviously restates its line and watch for a `[semantic]` finding.
+
+**Calibrating.** A question's `threshold` is the probability at which it fires. Run your clean code through the judge, set each threshold above the highest score a clean comment gets, and only then move `semantic` from `warn` to `block`. JEV makes a good labeller for that calibration even if Laya does the everyday judging.
 
 ## Escaping it
 
@@ -406,7 +471,7 @@ crates/stupid-comments/src/
 ├── lang.rs        # language detection and grammar bindings
 ├── comments.rs    # extraction and classification
 ├── rules.rs       # the deterministic rules
-├── semantic.rs    # the opt-in LLM judge
+├── semantic.rs    # the opt-in judge: System One endpoints, then harness CLIs
 ├── policy.rs      # config and policy resolution
 ├── hook.rs        # hook payloads, shared by every harness
 ├── suppress.rs    # git-anchored pragmas
@@ -444,7 +509,7 @@ Releases are derived from Conventional Commits by semantic-release, and the npm 
 - The line-scan fallback reads whole-line comments only, so a trailing `# comment` on a value line goes unchecked in a templated file.
 - Python has no grammar yet, so `.py` files are named as unchecked rather than checked.
 - `minProseCommentsForRatio` counts comment *blocks*, not lines, so a file carrying fewer than four separate blocks never trips the ratio rule however much of the file they cover. Long blocks are caught by the length rule instead.
-- Semantic judging costs a model call per checked file, so it is off by default.
+- Semantic judging is off by default. Thresholds are yours to calibrate, and a harness judge is too slow for the write gate, so it only helps at the stop gate.
 - The `Stop` gate diffs against `HEAD`, so a tree that was already dirty before the session has those earlier changes considered too.
 - Policy is resolved from the session's working directory, not from the file being written, so a write outside the workspace answers to the workspace's policy.
 - DSH also ships a text-editor tool. Its `create` and `str_replace` commands are translated and checked before the write; its `insert` command carries no anchor to reconstruct from, so it falls to the stop gate.
@@ -452,7 +517,7 @@ Releases are derived from Conventional Commits by semantic-release, and the npm 
 - Under DSH, `subagent/end` is an observation point rather than a decision point. A subagent that ends on a violation is handed the finding as context; only the parent's own stop gate can force the rewrite.
 - Pi has no built-in subagents, so it has no `SubagentStop` counterpart. omp skips `session_stop` for its subagents, so their writes answer to the pre-write gate and to the parent's stop gate.
 - Pi's `edit` strips a BOM, normalizes CRLF, and falls back to fuzzy matching (trailing whitespace, typographic quotes) before it gives up on an anchor. The engine matches anchors literally, so wherever Pi needed one of those, the pre-write gate stands down and the stop gate catches the result.
-- omp's default `hashline` edits, and its `patch`, `apply_patch`, and `sloppy` modes, carry no anchors the engine can rebuild a file from, so those edits land unchecked and the stop gate catches what they wrote. Writes are always checked first. Set `edit.mode: replace` in omp's `config.yml` to have edits checked before they land too.
+- omp's default `hashline` edits, and its `patch`, `apply_patch`, and `sloppy` modes, carry no anchors the engine can rebuild a file from, so the extension snapshots their targets on `tool_call` and runs the same pre-write engine on `tool_result`, reverting the whole call when a violation blocks. Writes and `replace`-mode edits are still checked before they land. Set `edit.mode: replace` in omp's `config.yml` to have every edit checked up front too.
 - omp shows its stop-gate continuation as a hidden extension message, so the plugin adds a one-line warning when it sends the model back. omp-web renders that hidden message itself, as a collapsible panel.
 - Pi's one-shot `-p` and `--mode json` runs shut down once the typed prompt resolves. A slash command starts the prompt it sends without that prompt being awaited, so `/stupid-comments:*` never reaches the model there. The interactive TUI and RPC mode run it normally.
 - The DSH, Pi, and omp plugins report a missing binary the first time a write is about to be checked, not at session start, so a session that never writes code stays silent about it.

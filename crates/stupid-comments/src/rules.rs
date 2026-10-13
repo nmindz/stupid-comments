@@ -30,6 +30,8 @@ pub struct Context<'a> {
     pub rules: &'a Rules,
     /// Set by the human-invoked sweep; permits deletion as a remedy.
     pub adjudicate: bool,
+    /// Lines a write introduced; the judge spends its budget on these alone.
+    pub focus: Option<&'a [(usize, usize)]>,
 }
 
 pub fn evaluate(ctx: &Context, extraction: &Extraction) -> Vec<Finding> {

@@ -82,7 +82,10 @@ fn pre_tool_use(payload: &Value, policy: &Policy) -> Analysis {
 
     let (source, touched) = match Intent::of(tool) {
         Some(Intent::Write) => match input.get("content").and_then(Value::as_str) {
-            Some(c) => (c.to_string(), None),
+            Some(c) => {
+                let previous = input.get("previous_content").and_then(Value::as_str);
+                (c.to_string(), previous.map(|p| changed_lines(p, c)))
+            }
             None => return (Vec::new(), Vec::new()),
         },
         Some(Intent::Edit) => match reconstruct(path, input) {
@@ -94,8 +97,15 @@ fn pre_tool_use(payload: &Value, policy: &Policy) -> Analysis {
 
     let name = path.display().to_string();
     let head = crate::vcs::show_head(path);
-    let findings =
-        crate::analyze_source_with(&name, &source, lang, policy, false, head.as_deref());
+    let findings = crate::analyze_source_with(
+        &name,
+        &source,
+        lang,
+        policy,
+        false,
+        head.as_deref(),
+        touched.as_deref(),
+    );
     let findings = match touched {
         Some(ranges) => findings
             .into_iter()
@@ -124,6 +134,24 @@ impl Intent {
             _ => None,
         }
     }
+}
+
+/// A write that names the file it replaces (an edit already applied by the
+/// harness) answers only for the lines that differ from it.
+fn changed_lines(previous: &str, current: &str) -> Vec<(usize, usize)> {
+    similar::TextDiff::from_lines(previous, current)
+        .ops()
+        .iter()
+        .filter_map(|op| {
+            let new = op.new_range();
+            match op.tag() {
+                similar::DiffTag::Insert | similar::DiffTag::Replace if !new.is_empty() => {
+                    Some((new.start + 1, new.end))
+                }
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 /// Applies the pending edit in memory so rules see whole-file context,
@@ -213,7 +241,7 @@ fn stop(cwd: &Path, policy: &Policy) -> Analysis {
     let mut counts = Vec::new();
 
     for (file, ranges) in changed_files(cwd) {
-        let findings = crate::analyze_file(&file, policy, false);
+        let findings = crate::analyze_file_in(&file, policy, false, ranges.as_deref());
         out.extend(findings.into_iter().filter(|f| match &ranges {
             Some(r) => intersects(f, r),
             None => true,

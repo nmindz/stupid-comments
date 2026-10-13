@@ -112,6 +112,7 @@ fn a_pragma_already_in_head_suppresses() {
         &p,
         false,
         Some(SUPPRESSED),
+        None,
     );
     assert!(findings.is_empty(), "committed pragma must hold: {findings:#?}");
 }
@@ -127,6 +128,7 @@ fn a_pragma_written_in_this_change_does_not_suppress() {
         &p,
         false,
         Some(head),
+        None,
     );
     assert!(
         findings.iter().any(|f| f.rule == "prose-comment-too-long"),
@@ -146,7 +148,7 @@ fn ignore_file_covers_everything_when_committed() {
     let src = "// stupid-comments: ignore-file\nexport const x = 1;\n// a\n// b\n// c\n// d\n// e\n// f\nconst y = 2;\n";
     let p = policy(&[]);
     let findings =
-        stupid_comments::analyze_source_with("x.ts", src, Lang::TypeScript, &p, false, Some(src));
+        stupid_comments::analyze_source_with("x.ts", src, Lang::TypeScript, &p, false, Some(src), None);
     assert!(findings.is_empty(), "{findings:#?}");
 }
 
@@ -432,6 +434,7 @@ fn without_agent_homes(dir: &std::path::Path) {
     std::env::set_var("DSH_HOME", dir.join("absent-dsh"));
     std::env::set_var("PI_CODING_AGENT_DIR", dir.join("absent-pi"));
     std::env::set_var("AGENTS_HOME", dir.join("absent-agents"));
+    std::env::set_var("STUPID_COMMENTS_CONFIG", dir.join("absent-user-config.jsonc"));
 }
 
 fn scratch(name: &str) -> std::path::PathBuf {
@@ -819,6 +822,224 @@ fn the_omp_agent_home_supplies_the_policy() {
     let out = String::from_utf8_lossy(&command.output().expect("binary runs").stdout).into_owned();
     assert!(out.contains("From omp."), "{out}");
     assert!(out.contains(&omp.join("AGENTS.md").display().to_string()), "{out}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+fn hook_subprocess(dir: &std::path::Path, env: &[(&str, &std::ffi::OsStr)], payload: &serde_json::Value) -> (i32, String) {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_stupid-comments"));
+    command.args(["hook", "pi"]).env("HOME", dir);
+    for var in ["CLAUDE_CONFIG_DIR", "DSH_HOME", "PI_CODING_AGENT_DIR", "AGENTS_HOME", "STUPID_COMMENTS_CONFIG"] {
+        command.env(var, dir.join(format!("absent-{var}")));
+    }
+    for (var, value) in env {
+        command.env(var, value);
+    }
+    let mut child = command
+        .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("binary runs");
+    use std::io::Write;
+    child.stdin.take().unwrap().write_all(payload.to_string().as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stderr).into_owned())
+}
+
+#[test]
+fn a_write_naming_its_previous_content_answers_only_for_changed_lines() {
+    let dir = scratch("previous-content");
+    without_agent_homes(&dir);
+    std::fs::write(dir.join("AGENTS.md"), "# Comments Policy\n\nEarn the line.\n").unwrap();
+    std::fs::write(
+        dir.join(".stupid-comments.jsonc"),
+        r#"{ "mode": "block", "bannedPatterns": ["obviously stupid"] }"#,
+    )
+    .unwrap();
+    let file = dir.join("sample.ts");
+    let before = "// an obviously stupid legacy note\nexport const a = 1;\nexport const b = 2;\n";
+    let check = |after: &str| {
+        let payload = serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "cwd": dir.to_str().unwrap(),
+            "tool_name": "write",
+            "tool_input": { "file_path": file.to_str().unwrap(), "content": after, "previous_content": before },
+        });
+        hook::run(&payload.to_string()).expect("the hook answers")
+    };
+
+    let outcome = check("// an obviously stupid legacy note\nexport const a = 1;\nexport const b = 3;\n");
+    assert!(!outcome.block, "an untouched line was blamed: {}", outcome.message);
+
+    let outcome = check("// an obviously stupid legacy note\nexport const a = 1;\n// obviously stupid too\nexport const b = 2;\n");
+    assert!(outcome.block, "the added comment must answer");
+    assert!(outcome.message.contains(":3-3"), "{}", outcome.message);
+    assert!(!outcome.message.contains(":1-1"), "{}", outcome.message);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_project_config_overrides_the_user_config_key_by_key() {
+    let dir = scratch("user-config");
+    let project = dir.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let user = dir.join("user.jsonc");
+    std::fs::write(&user, r#"{ "mode": "block", "bannedPatterns": ["PRD"], "maxProseCommentLines": 3 }"#).unwrap();
+    std::fs::write(project.join("AGENTS.md"), "# Comments Policy\n\nEarn the line.\n").unwrap();
+
+    let out = policy_source(&dir, &project, &[("STUPID_COMMENTS_CONFIG", &user)]);
+    assert!(out.contains("mode:   Block"), "the user config is the global baseline: {out}");
+    assert!(out.contains("\"PRD\""), "{out}");
+
+    std::fs::write(project.join(".stupid-comments.jsonc"), r#"{ "maxProseCommentLines": 7 }"#).unwrap();
+    let out = policy_source(&dir, &project, &[("STUPID_COMMENTS_CONFIG", &user)]);
+    assert!(out.contains("mode:   Block"), "keys the project leaves alone stay global: {out}");
+    assert!(out.contains("max_prose_comment_lines: 7"), "{out}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_explicit_prose_file_quotes_only_its_policy_section() {
+    let dir = scratch("explicit-prose");
+    let project = dir.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let memory = dir.join("AGENTS.md");
+    std::fs::write(&memory, "# Commits\n\nSign nothing.\n\n# Comments Policy\n\nEarn the line.\n").unwrap();
+    let user = dir.join("user.jsonc");
+    std::fs::write(&user, format!(r#"{{ "prose": "{}" }}"#, memory.display())).unwrap();
+
+    let out = policy_source(&dir, &project, &[("STUPID_COMMENTS_CONFIG", &user)]);
+    assert!(out.contains("Earn the line."), "{out}");
+    assert!(!out.contains("Sign nothing."), "the rest of the memory file leaked in: {out}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_judge_harness_follows_precedence_unless_pinned() {
+    let dir = scratch("harness-order");
+    let project = dir.join("project");
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(project.join("AGENTS.md"), "# Comments Policy\n\nEarn the line.\n").unwrap();
+    for name in ["claude", "opencode"] {
+        let path = bin.join(name);
+        std::fs::write(&path, "#!/bin/sh\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let config = project.join(".stupid-comments.jsonc");
+    let harness = |json: &str| {
+        std::fs::write(&config, json).unwrap();
+        let out = policy_source(&dir, &project, &[("PATH", &bin), ("STUPID_COMMENTS_CONFIG", &dir.join("absent"))]);
+        out.lines().find(|l| l.trim_start().starts_with("harness:")).unwrap_or_default().trim().to_string()
+    };
+
+    assert!(harness("{}").starts_with("harness: opencode"), "opencode outranks claude by default");
+    assert!(harness(r#"{ "judge": { "harnesses": ["claude", "opencode"] } }"#).starts_with("harness: claude"));
+    assert!(harness(r#"{ "judge": { "harness": "claude" } }"#).starts_with("harness: claude"));
+    assert!(harness(r#"{ "judge": { "harness": "omp" } }"#).starts_with("harness: none found"), "a pinned harness never falls back");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A System One endpoint that answers every request with `answers` and hands the request body back.
+fn systemone_stub(answers: serde_json::Value) -> (String, std::sync::mpsc::Receiver<serde_json::Value>) {
+    use std::io::{BufRead, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut reader = std::io::BufReader::new(stream);
+            let mut length = 0;
+            let mut line = String::new();
+            while reader.read_line(&mut line).unwrap_or(0) > 0 && line != "\r\n" {
+                if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = v.trim().parse().unwrap_or(0);
+                }
+                line.clear();
+            }
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).ok();
+            tx.send(serde_json::from_slice(&body).unwrap_or_default()).ok();
+            let reply = serde_json::json!({ "answers": answers }).to_string();
+            let mut stream = reader.into_inner();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len()).ok();
+        }
+    });
+    (url, rx)
+}
+
+#[test]
+fn a_systemone_judge_blocks_only_answers_past_their_threshold() {
+    let dir = scratch("systemone");
+    without_agent_homes(&dir);
+    let (url, requests) = systemone_stub(serde_json::json!({
+        "prd": { "type": "noul", "noul": 0.9 },
+        "restates": { "type": "noul", "noul": 0.7 },
+    }));
+    std::fs::write(dir.join("AGENTS.md"), "# Comments Policy\n\nEarn the line.\n").unwrap();
+    let config = serde_json::json!({
+        "mode": "block",
+        "semantic": "block",
+        "judge": {
+            "backend": "systemone",
+            "budgetMs": 600_000,
+            "systemone": [{ "url": "http://127.0.0.1:9", "model": "dead" }, { "url": url, "model": "laya-en" }],
+            "questions": [
+                { "id": "prd", "instructions": "Does this comment cite a requirement document?", "threshold": 0.6 },
+                { "id": "restates", "instructions": "Does this comment restate the code?", "threshold": 0.75 },
+            ],
+        },
+    });
+    std::fs::write(dir.join(".stupid-comments.jsonc"), config.to_string()).unwrap();
+    let file = dir.join("sample.ts");
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "cwd": dir.to_str().unwrap(),
+        "tool_name": "write",
+        "tool_input": { "file_path": file.to_str().unwrap(), "content": "// per the spec\nexport const a = 1;\n" },
+    });
+
+    let outcome = hook::run(&payload.to_string()).expect("the hook answers");
+    assert!(outcome.block, "{}", outcome.message);
+    assert!(outcome.message.contains("cite a requirement document"), "{}", outcome.message);
+    assert!(!outcome.message.contains("restate the code"), "0.7 is under its 0.75 threshold: {}", outcome.message);
+
+    let request = requests.recv_timeout(std::time::Duration::from_secs(5)).expect("the live endpoint was asked");
+    assert_eq!(request["model"], "laya-en", "the dead endpoint is skipped, not fatal");
+    assert!(request["state"].as_str().unwrap().contains("export const a = 1;"), "the code below rides along: {request}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_slow_judge_is_cut_off_without_losing_deterministic_findings() {
+    let dir = scratch("judge-budget");
+    std::fs::write(dir.join("AGENTS.md"), "# Comments Policy\n\nEarn the line.\n").unwrap();
+    let config = serde_json::json!({
+        "mode": "block",
+        "semantic": "block",
+        "bannedPatterns": ["obviously stupid"],
+        "judge": { "backend": "command", "command": ["sleep", "30"], "budgetMs": 500 },
+    });
+    std::fs::write(dir.join(".stupid-comments.jsonc"), config.to_string()).unwrap();
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "cwd": dir.to_str().unwrap(),
+        "tool_name": "write",
+        "tool_input": { "file_path": dir.join("a.ts").to_str().unwrap(), "content": "// obviously stupid\nexport const a = 1;\n" },
+    });
+
+    let started = std::time::Instant::now();
+    let (code, stderr) = hook_subprocess(&dir, &[], &payload);
+    assert!(started.elapsed() < std::time::Duration::from_secs(5), "the judge outlived its budget");
+    assert_eq!(code, 2, "{stderr}");
+    assert!(stderr.contains("banned-pattern"), "{stderr}");
 
     std::fs::remove_dir_all(&dir).ok();
 }

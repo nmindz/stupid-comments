@@ -55,7 +55,7 @@ crates/stupid-comments/
 │   ├── lang.rs        # language detection and grammar bindings
 │   ├── comments.rs    # extraction and classification
 │   ├── rules.rs       # the deterministic rules
-│   ├── semantic.rs    # the opt-in LLM judge
+│   ├── semantic.rs    # the opt-in judge: System One endpoints, then harness CLIs
 │   ├── policy.rs      # config and policy resolution
 │   ├── hook.rs        # hook payloads, shared by every harness
 │   ├── suppress.rs    # git-anchored pragmas
@@ -74,7 +74,7 @@ plugins/stupid-comments/
 ├── dsh/               # the DSH plugin: seams, payloads, commands, its own test
 └── pi/                # the Pi and omp extension: events, payloads, commands, its own test
 package.json           # the DSH bundle manifest (dsh.bundle.patch) and Pi package manifest (pi.extensions)
-scripts/               # version sync and the manifest checks no compiler can do
+scripts/               # version sync, the manifest checks no compiler can do, and the Laya judge server
 .github/workflows/     # CI, and the release that stages the npm package
 ```
 

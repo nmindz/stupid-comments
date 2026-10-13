@@ -18,6 +18,16 @@ const SKIP_DIRS: &[&str] = &[".git", ".jj", "target", "node_modules", "dist", "b
 
 /// Every failure path yields no findings — the gate never blocks on ambiguity.
 pub fn analyze_file(path: &Path, policy: &Policy, adjudicate: bool) -> Vec<Finding> {
+    analyze_file_in(path, policy, adjudicate, None)
+}
+
+/// `focus` narrows semantic judging to the given 1-based inclusive line ranges.
+pub fn analyze_file_in(
+    path: &Path,
+    policy: &Policy,
+    adjudicate: bool,
+    focus: Option<&[(usize, usize)]>,
+) -> Vec<Finding> {
     if excluded(path, policy) {
         return Vec::new();
     }
@@ -35,6 +45,7 @@ pub fn analyze_file(path: &Path, policy: &Policy, adjudicate: bool) -> Vec<Findi
         policy,
         adjudicate,
         head.as_deref(),
+        focus,
     )
 }
 
@@ -45,7 +56,7 @@ pub fn analyze_source(
     policy: &Policy,
     adjudicate: bool,
 ) -> Vec<Finding> {
-    analyze_source_with(file, source, lang, policy, adjudicate, None)
+    analyze_source_with(file, source, lang, policy, adjudicate, None, None)
 }
 
 pub fn analyze_source_with(
@@ -55,6 +66,7 @@ pub fn analyze_source_with(
     policy: &Policy,
     adjudicate: bool,
     head: Option<&str>,
+    focus: Option<&[(usize, usize)]>,
 ) -> Vec<Finding> {
     let Some(extraction) = comments::extract(source, lang) else {
         return Vec::new();
@@ -65,6 +77,7 @@ pub fn analyze_source_with(
         lang,
         rules: &policy.rules,
         adjudicate,
+        focus,
     };
 
     let mut findings = rules::evaluate(&ctx, &extraction);

@@ -1,8 +1,11 @@
+use crate::semantic::{Judge, JudgeConfig};
 use anyhow::Result;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 pub const CONFIG_NAME: &str = ".stupid-comments.jsonc";
+/// Points at the user-level config; overrides the XDG location.
+pub const USER_CONFIG_ENV: &str = "STUPID_COMMENTS_CONFIG";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -31,7 +34,7 @@ pub struct Config {
     pub banned_patterns: Option<Vec<String>>,
     pub redundancy: Option<Mode>,
     pub semantic: Option<Mode>,
-    pub semantic_command: Option<Vec<String>>,
+    pub judge: Option<JudgeConfig>,
     pub exclude: Option<Vec<String>>,
 }
 
@@ -45,7 +48,7 @@ pub struct Rules {
     pub banned_patterns: Vec<String>,
     pub redundancy: Mode,
     pub semantic: Mode,
-    pub semantic_command: Vec<String>,
+    pub judge: Judge,
     pub exclude: Vec<String>,
 }
 
@@ -60,7 +63,7 @@ impl Default for Rules {
             banned_patterns: Vec::new(),
             redundancy: Mode::Warn,
             semantic: Mode::Shadow,
-            semantic_command: vec!["claude".into(), "-p".into()],
+            judge: Judge::default(),
             exclude: Vec::new(),
         }
     }
@@ -73,33 +76,48 @@ pub struct Policy {
     pub rules: Rules,
 }
 
-/// Absent policy means the tool stays completely silent.
+/// Absent policy means the tool stays completely silent. The user config is the
+/// global baseline; a project config overrides it key by key.
 pub fn resolve(start: &Path) -> Result<Option<Policy>> {
-    let config_path = find_upward(start, CONFIG_NAME);
-    let config = match &config_path {
-        Some(p) => Some(read_config(p)?),
-        None => None,
-    };
+    let user_path = user_config_path().filter(|p| p.is_file());
+    let project_path = find_upward(start, CONFIG_NAME);
+    let mut layers = Vec::new();
+    for path in user_path.iter().chain(project_path.iter()) {
+        layers.push(read_config(path)?);
+    }
 
-    let (prose, source) = match resolve_prose(start, config.as_ref().and_then(|c| c.prose.as_deref())) {
+    let explicit = layers.iter().rev().find_map(|c| c.prose.as_deref());
+    let (prose, source) = match resolve_prose(start, explicit) {
         Some(found) => found,
-        None => match &config_path {
+        None => match project_path.as_ref().or(user_path.as_ref()) {
             Some(p) => (String::new(), p.display().to_string()),
             None => return Ok(None),
         },
     };
 
-    Ok(Some(Policy {
-        prose,
-        source,
-        rules: merge(config),
-    }))
+    let mut rules = Rules::default();
+    for layer in layers {
+        apply(&mut rules, layer);
+    }
+    Ok(Some(Policy { prose, source, rules }))
 }
 
-fn merge(config: Option<Config>) -> Rules {
-    let mut rules = Rules::default();
-    let Some(c) = config else { return rules };
+/// `$STUPID_COMMENTS_CONFIG`, else `$XDG_CONFIG_HOME/stupid-comments/config.jsonc`,
+/// else `~/.config/stupid-comments/config.jsonc`.
+pub fn user_config_path() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var(USER_CONFIG_ENV) {
+        if !p.trim().is_empty() {
+            return Some(expand_home(&p));
+        }
+    }
+    let base = match std::env::var("XDG_CONFIG_HOME") {
+        Ok(dir) if !dir.trim().is_empty() => PathBuf::from(dir),
+        _ => PathBuf::from(std::env::var("HOME").ok()?).join(".config"),
+    };
+    Some(base.join("stupid-comments").join("config.jsonc"))
+}
 
+fn apply(rules: &mut Rules, c: Config) {
     if let Some(v) = c.mode {
         rules.mode = v;
     }
@@ -124,15 +142,12 @@ fn merge(config: Option<Config>) -> Rules {
     if let Some(v) = c.semantic {
         rules.semantic = v;
     }
-    if let Some(v) = c.semantic_command {
-        if !v.is_empty() {
-            rules.semantic_command = v;
-        }
+    if let Some(v) = c.judge {
+        rules.judge.apply(v);
     }
     if let Some(v) = c.exclude {
         rules.exclude = v;
     }
-    rules
 }
 
 fn read_config(path: &Path) -> Result<Config> {
@@ -160,7 +175,9 @@ fn resolve_prose(start: &Path, explicit: Option<&str>) -> Option<(String, String
     if let Some(path) = explicit {
         let expanded = expand_home(path);
         let text = std::fs::read_to_string(&expanded).ok()?;
-        return Some((text.trim().to_string(), expanded.display().to_string()));
+        // Agent memory carries more than the policy; quote only its section.
+        let prose = extract_section(&text).unwrap_or_else(|| text.trim().to_string());
+        return Some((prose, expanded.display().to_string()));
     }
 
     for candidate in memory_files(start) {

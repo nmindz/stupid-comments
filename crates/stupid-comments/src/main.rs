@@ -220,7 +220,11 @@ fn show_policy() -> Result<ExitCode> {
         None => println!("No comment policy found. stupid-comments is inert."),
         Some(p) => {
             println!("source: {}", p.source);
+            if let Some(user) = policy::user_config_path().filter(|u| u.is_file()) {
+                println!("user config: {}", user.display());
+            }
             println!("mode:   {:?}", p.rules.mode);
+            println!("judge:  {:?} via {}", p.rules.semantic, p.rules.judge.describe());
             println!("rules:  {:#?}\n", p.rules);
             println!("--- policy text ---\n{}", p.prose);
         }
