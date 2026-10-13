@@ -54,8 +54,6 @@ jobs:
         run: git checkout -B master ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11
 
       - uses: actions/setup-node@v5
         with:
