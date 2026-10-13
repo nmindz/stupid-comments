@@ -42,7 +42,7 @@ Or, for Pi:
 pi install git:github.com/nmindz/stupid-comments
 ```
 
-Or, for oh-my-pi, which covers both the `omp` TUI and omp-web:
+Or, for oh-my-pi, which covers both the `omp` TUI and omp-web. omp's plugin installer runs [Bun](https://bun.sh), so `bun` must be on `PATH`:
 
 ```sh
 omp plugin install github:nmindz/stupid-comments
@@ -146,7 +146,7 @@ It targets DeepSeek Harness 0.2.x. The range is declared through optional `@deep
 
 ```sh
 pi install git:github.com/nmindz/stupid-comments
-pi install npm:stupid-comments                  # from the registry, once a release carries Pi support
+pi install npm:stupid-comments                  # from the registry
 pi install /path/to/clone                       # from a checkout
 ```
 
@@ -156,9 +156,11 @@ The package declares its extension under the `pi` key of `package.json`, which i
 
 ```sh
 omp plugin install github:nmindz/stupid-comments
-omp plugin install stupid-comments              # from the registry, once a release carries Pi support
+omp plugin install stupid-comments              # from the registry
 omp plugin link /path/to/clone                  # from a checkout
 ```
+
+`omp plugin install` runs Bun, so it needs `bun` on `PATH`. Without it, the install fails with `Executable not found in $PATH: "bun"`.
 
 oh-my-pi reads the same `pi` manifest key and loads the same extension, which switches to omp's `session_stop` seam on its own. omp-web discovers extensions with omp's own loader and keeps user-level plugins for every project, trusted or not, so one install covers the `omp` TUI and the browser alike. Both have been run end to end against omp 18.1, the line omp-web 0.4 pins.
 
@@ -351,7 +353,7 @@ Deterministic rules cannot decide whether a comment earns its place. Setting `"s
   "systemone": [{ "url": "http://127.0.0.1:8766", "model": "laya-en", "apiKeyEnv": "TYPESAFE_API_KEY" }],
   "questions": [
     { "id": "prd", "instructions": "Does this comment reference a PRD or requirement number?", "threshold": 0.85 },
-    { "id": "restates", "instructions": "Does this comment merely restate what the code next to it obviously does?", "threshold": 0.85 }
+    { "id": "restates", "instructions": "Does this comment merely restate what the code next to it obviously does?", "threshold": 0.8 }
   ],
   "harness": "omp",             // pin one harness; otherwise the first of `harnesses` on PATH
   "harnesses": ["omp", "dsh", "opencode", "claude", "codex", "pi", "cursor-agent", "gemini", "copilot"],
@@ -406,6 +408,8 @@ export TYPESAFE_API_KEY=…             # e.g. from a ~/.zshrc.d fragment or you
 An endpoint whose `apiKeyEnv` is unset or empty is skipped rather than called unauthenticated. Either way, confirm the wiring with `stupid-comments policy`, which lists the endpoints in the order they are tried, then write a comment that obviously restates its line and watch for a `[semantic]` finding.
 
 **Calibrating.** A question's `threshold` is the probability at which it fires. Run your clean code through the judge, set each threshold above the highest score a clean comment gets, and only then move `semantic` from `warn` to `block`. JEV makes a good labeller for that calibration even if Laya does the everyday judging.
+
+Calibrate on what the judge is actually sent, which is the comment plus the code below it, not the comment alone. The surrounding code lowers scores. Laya rates `// Increment the counter` above `counter += 1;` at 0.93 on its own, but 0.83 with the next three lines attached, so a 0.85 threshold would miss the textbook case. That is why the example sets `restates` to 0.8. On this repository's own comments, 0.8 still fired on only 2 of 28 clean ones.
 
 ## Escaping it
 
