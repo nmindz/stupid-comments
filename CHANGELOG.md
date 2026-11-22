@@ -2,6 +2,17 @@
 
 Every release is generated from Conventional Commits by semantic-release.
 
+## [0.4.1](https://github.com/nmindz/stupid-comments/compare/v0.4.0...v0.4.1) (2026-11-22)
+
+### Documentation
+
+* **readme:** name the bun prerequisite and fix the judge threshold [skip ci] ([fb2f41c](https://github.com/nmindz/stupid-comments/commit/fb2f41cf3460a4c46e743ef67dbd4a02f1949eaa))
+
+### Build
+
+* **pnpm:** pin pnpm 12.3.4 through packageManager ([4b99671](https://github.com/nmindz/stupid-comments/commit/4b99671738e116456e59fd557dc938901c96a154))
+* **pnpm:** upgrade to pnpm 12.11.2 ([fb2f4f4](https://github.com/nmindz/stupid-comments/commit/fb2f4f448be13a159af18f9196d53a673db3cf24))
+
 ## [0.4.0](https://github.com/nmindz/stupid-comments/compare/v0.3.0...v0.4.0) (2026-10-13)
 
 ### Features
